@@ -9,13 +9,8 @@ linters:
     - gosec
     - misspell
     - noctx
-    - revive
     - unconvert
     - unparam
-  settings:
-    revive:
-      rules:
-        - name: exported
   exclusions:
     rules:
       - path: _test\.go
