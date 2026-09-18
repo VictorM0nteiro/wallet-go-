@@ -1,9 +1,9 @@
 package domain
 
-type AccountKind string
-
 // AccountKind distinguishes ordinary customer accounts from the single
 // `system` account used as the counterparty for deposits and withdrawals.
+type AccountKind string
+
 const (
 	AccountKindCustomer AccountKind = "customer"
 	AccountKindSystem   AccountKind = "system"
