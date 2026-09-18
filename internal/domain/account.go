@@ -5,8 +5,8 @@ type AccountKind string
 // AccountKind distinguishes ordinary customer accounts from the single
 // `system` account used as the counterparty for deposits and withdrawals.
 const (
-	AccountKindCostume AccountKind = "customer"
-	AccountKindSystem  AccountKind = "System"
+	AccountKindCustomer AccountKind = "customer"
+	AccountKindSystem   AccountKind = "system"
 )
 
 // CanDebit reports whether amount can be debited from an account currently
@@ -17,12 +17,12 @@ const (
 // modeled as transfers to/from it, so it must be allowed to go negative —
 // otherwise the very first deposit in the system would be impossible, since
 // there would be nowhere for the offsetting debit to come from.
-func CanDebit(balance Money, amount Money, kind AccountKind) error{
-	if kind == AccountKindSystem{
+func CanDebit(balance Money, amount Money, kind AccountKind) error {
+	if kind == AccountKindSystem {
 		return nil
 	}
 	remaining, err := balance.Sub(amount)
-	if err != nil{
+	if err != nil {
 		return err
 	}
 	if remaining < 0 {
