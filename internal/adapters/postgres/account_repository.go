@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/VictorM0nteiro/wallet-go/internal/domain"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/VictorM0nteiro/wallet-go/internal/domain"
 )
 
 // Account is the row shape of the accounts table. It is a persistence

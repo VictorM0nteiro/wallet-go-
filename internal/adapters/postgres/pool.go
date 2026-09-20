@@ -16,7 +16,7 @@ import (
 // docs/plano-execucao-wallet-go.md) exists to catch.
 type PoolConfig struct {
 	DSN             string
-	MaxConns        int64
+	MaxConns        int32
 	MaxConnLifetime time.Duration
 	AcquireTimeout  time.Duration
 }
@@ -39,7 +39,7 @@ func NewPool(ctx context.Context, cfg PoolConfig) (*Pool, error) {
 	}
 
 	if cfg.MaxConns > 0 {
-		pgxCfg.MaxConns = int32(cfg.MaxConns)
+		pgxCfg.MaxConns = cfg.MaxConns
 	}
 	if cfg.MaxConnLifetime > 0 {
 		pgxCfg.MaxConnLifetime = cfg.MaxConnLifetime

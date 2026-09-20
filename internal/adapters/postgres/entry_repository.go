@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/VictorM0nteiro/wallet-go/internal/domain"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/VictorM0nteiro/wallet-go/internal/domain"
 )
 
 // Entry is the row shape of the entries table.
@@ -51,7 +52,7 @@ func (r *EntryRepository) InsertBatch(ctx context.Context, entries []Entry) erro
 	}
 
 	results := r.pool.SendBatch(ctx, batch)
-	defer results.Close()
+	defer func() { _ = results.Close() }()
 
 	for range entries {
 		if _, err := results.Exec(); err != nil {
