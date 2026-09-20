@@ -14,4 +14,12 @@ var (
 	// ErrMoneyOverflow is returned when a Money arithmetic operation would
 	// overflow int64.
 	ErrMoneyOverflow = errors.New("domain: money operation overflows int64")
+
+	// ErrSameAccount is returned when a transfer's source and destination
+	// are the same account.
+	ErrSameAccount = errors.New("domain: source and destination accounts must differ")
+
+	// ErrAccountNotFound is returned when a transfer references an account
+	// that does not exist.
+	ErrAccountNotFound = errors.New("domain: account not found")
 )
