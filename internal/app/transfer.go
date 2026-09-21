@@ -11,10 +11,10 @@ import (
 // TransferRequest is a validated request to move Amount from one account
 // to another. ID is the identity of the transfer being created.
 type TransferRequest struct {
-	ID             uuid.UUID
+	ID            uuid.UUID
 	FromAccountID uuid.UUID
-	ToAccountID    uuid.UUID
-	Amount         domain.Money
+	ToAccountID   uuid.UUID
+	Amount        domain.Money
 }
 
 // TransferExecutor is the port for atomically executing a transfer. How it
