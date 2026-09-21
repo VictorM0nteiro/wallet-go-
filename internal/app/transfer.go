@@ -2,58 +2,87 @@ package app
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 
 	"github.com/google/uuid"
 
 	"github.com/VictorM0nteiro/wallet-go/internal/domain"
 )
 
-// TransferRequest is a validated request to move Amount from one account
-// to another. ID is the identity of the transfer being created.
-type TransferRequest struct {
-	ID            uuid.UUID
-	FromAccountID uuid.UUID
-	ToAccountID   uuid.UUID
-	Amount        domain.Money
-}
+// StatusTransferCreated is the status stored with a successful transfer and
+// replayed verbatim on duplicate requests.
+const StatusTransferCreated = 201
 
-// TransferExecutor is the port for atomically executing a transfer. How it
-// guarantees atomicity and the non-negative-balance invariant under
-// concurrency (row locks, SERIALIZABLE + retry, ...) is the adapter's
-// business — the use case must not know which strategy is in use.
-type TransferExecutor interface {
-	Execute(ctx context.Context, req TransferRequest) error
-}
-
-// TransferService is the transfer use case.
-type TransferService struct {
-	executor TransferExecutor
-}
-
-// NewTransferService builds a TransferService backed by executor.
-func NewTransferService(executor TransferExecutor) *TransferService {
-	return &TransferService{executor: executor}
-}
-
-// Transfer validates the input and delegates execution to the port. It
-// returns the id of the created transfer.
-func (s *TransferService) Transfer(ctx context.Context, from, to uuid.UUID, amountCents int64) (uuid.UUID, error) {
-	amount, err := domain.NewTransferAmount(amountCents)
+// Transfer validates the input, then runs the idempotent flow: claim the
+// key; if it was already claimed, replay or reject; otherwise execute the
+// transfer and store the response, all in one transaction.
+func (s *TransferService) Transfer(ctx context.Context, cmd TransferCommand) (TransferResult, error) {
+	amount, err := domain.NewTransferAmount(cmd.AmountCents)
 	if err != nil {
-		return uuid.Nil, err
+		return TransferResult{}, err
 	}
-	if from == to {
-		return uuid.Nil, domain.ErrSameAccount
+	if cmd.FromAccountID == cmd.ToAccountID {
+		return TransferResult{}, domain.ErrSameAccount
 	}
 
-	req := TransferRequest{
-		ID:            uuid.New(),
-		FromAccountID: from,
-		ToAccountID:   to,
-		Amount:        amount,
+	var result TransferResult
+	err = s.executor.InTx(ctx, func(ctx context.Context, tx TransferTx) error {
+		result = TransferResult{}
+
+		claimed, err := tx.ClaimKey(ctx, cmd.Key, cmd.Fingerprint)
+		if err != nil {
+			return err
+		}
+		if !claimed {
+			result, err = replay(ctx, tx, cmd)
+			return err
+		}
+
+		req := TransferRequest{
+			ID:            uuid.New(),
+			FromAccountID: cmd.FromAccountID,
+			ToAccountID:   cmd.ToAccountID,
+			Amount:        amount,
+		}
+		if err := tx.Execute(ctx, req); err != nil {
+			return err
+		}
+
+		body, err := json.Marshal(struct {
+			TransferID uuid.UUID `json:"transfer_id"`
+		}{req.ID})
+		if err != nil {
+			return fmt.Errorf("app: encode response: %w", err)
+		}
+		resp := StoredResponse{StatusCode: StatusTransferCreated, Body: body}
+
+		if err := tx.CompleteKey(ctx, cmd.Key, req.ID, resp); err != nil {
+			return err
+		}
+		result = TransferResult{TransferID: req.ID, Response: resp}
+		return nil
+	})
+	if err != nil {
+		return TransferResult{}, err
 	}
-	if err := s.executor.Execute(ctx, req); err != nil {
-		return uuid.Nil, err
+	return result, nil
+}
+
+func replay(ctx context.Context, tx TransferTx, cmd TransferCommand) (TransferResult, error) {
+	stored, err := tx.LoadKey(ctx, cmd.Key)
+	if err != nil {
+		return TransferResult{}, err
 	}
-	return req.ID, nil
+	if stored.Fingerprint != cmd.Fingerprint {
+		return TransferResult{}, ErrIdempotencyKeyReuse
+	}
+	if stored.State != KeyStateCompleted {
+		return TransferResult{}, ErrRequestInFlight
+	}
+	return TransferResult{
+		TransferID: stored.TransferID,
+		Response:   stored.Response,
+		Replayed:   true,
+	}, nil
 }
