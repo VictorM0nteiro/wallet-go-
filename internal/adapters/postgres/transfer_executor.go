@@ -6,10 +6,11 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/VictorM0nteiro/wallet-go/internal/app"
-	"github.com/VictorM0nteiro/wallet-go/internal/domain"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/VictorM0nteiro/wallet-go/internal/app"
+	"github.com/VictorM0nteiro/wallet-go/internal/domain"
 )
 
 // LockingTransferExecutor is concurrency strategy 1: pessimistic row locks.
