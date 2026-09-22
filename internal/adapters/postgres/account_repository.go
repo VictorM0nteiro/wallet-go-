@@ -4,27 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/VictorM0nteiro/wallet-go/internal/app"
 	"github.com/VictorM0nteiro/wallet-go/internal/domain"
 )
 
-// Account is the row shape of the accounts table. It is a persistence
-// concern, not a domain entity — internal/domain has no Account type yet
-// (a deliberate Bloco 4 decision), so this struct only borrows
-// domain.AccountKind for the Kind field.
-type Account struct {
-	ID        uuid.UUID
-	OwnerID   string
-	Kind      domain.AccountKind
-	Currency  string
-	CreatedAt time.Time
-}
+// pgUniqueViolation is the SQLSTATE for unique_violation.
+const pgUniqueViolation = "23505"
 
-// AccountRepository reads and writes the accounts table.
+// AccountRepository reads and writes the accounts table. It implements
+// app.AccountStore.
 type AccountRepository struct {
 	pool *Pool
 }
@@ -34,8 +27,9 @@ func NewAccountRepository(pool *Pool) *AccountRepository {
 	return &AccountRepository{pool: pool}
 }
 
-// Create inserts a new account row.
-func (r *AccountRepository) Create(ctx context.Context, a Account) error {
+// Create inserts a new account row. It returns
+// domain.ErrAccountAlreadyExists if (owner, kind, currency) is taken.
+func (r *AccountRepository) Create(ctx context.Context, a app.Account) error {
 	ctx, cancel := r.pool.withAcquireTimeout(ctx)
 	defer cancel()
 
@@ -45,14 +39,18 @@ func (r *AccountRepository) Create(ctx context.Context, a Account) error {
       `
 	_, err := r.pool.Exec(ctx, query, a.ID, a.OwnerID, string(a.Kind), a.Currency)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
+			return domain.ErrAccountAlreadyExists
+		}
 		return fmt.Errorf("postgres: create account: %w", err)
 	}
 	return nil
 }
 
-// FindByID looks up an account by id. It returns ErrAccountNotFound if no
-// row matches.
-func (r *AccountRepository) FindByID(ctx context.Context, id uuid.UUID) (Account, error) {
+// FindByID looks up an account by id. It returns domain.ErrAccountNotFound
+// if no row matches.
+func (r *AccountRepository) FindByID(ctx context.Context, id uuid.UUID) (app.Account, error) {
 	ctx, cancel := r.pool.withAcquireTimeout(ctx)
 	defer cancel()
 
@@ -63,17 +61,40 @@ func (r *AccountRepository) FindByID(ctx context.Context, id uuid.UUID) (Account
       `
 
 	var (
-		a    Account
+		a    app.Account
 		kind string
 	)
 	err := r.pool.QueryRow(ctx, query, id).Scan(&a.ID, &a.OwnerID, &kind, &a.Currency, &a.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return Account{}, ErrAccountNotFound
+			return app.Account{}, domain.ErrAccountNotFound
 		}
-		return Account{}, fmt.Errorf("postgres: find account: %w", err)
+		return app.Account{}, fmt.Errorf("postgres: find account: %w", err)
 	}
 	a.Kind = domain.AccountKind(kind)
 
 	return a, nil
+}
+
+// EnsureSystem makes sure the single system account exists and returns its
+// id. It is safe to call on every startup and from concurrent instances.
+func (r *AccountRepository) EnsureSystem(ctx context.Context) (uuid.UUID, error) {
+	ctx, cancel := r.pool.withAcquireTimeout(ctx)
+	defer cancel()
+
+	const insert = `
+              INSERT INTO accounts (id, owner_id, kind, currency)
+              VALUES ($1, 'system', 'system', 'BRL')
+              ON CONFLICT (owner_id, kind, currency) DO NOTHING
+      `
+	if _, err := r.pool.Exec(ctx, insert, uuid.New()); err != nil {
+		return uuid.Nil, fmt.Errorf("postgres: ensure system account: %w", err)
+	}
+
+	const selectID = `SELECT id FROM accounts WHERE owner_id = 'system' AND kind = 'system' AND currency = 'BRL'`
+	var id uuid.UUID
+	if err := r.pool.QueryRow(ctx, selectID).Scan(&id); err != nil {
+		return uuid.Nil, fmt.Errorf("postgres: read system account: %w", err)
+	}
+	return id, nil
 }

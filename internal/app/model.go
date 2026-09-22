@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -87,4 +88,66 @@ type TransferService struct {
 // NewTransferService builds a TransferService backed by executor.
 func NewTransferService(executor TransferExecutor) *TransferService {
 	return &TransferService{executor: executor}
+}
+
+// Account
+// Account is an account as seen by the use cases.
+type Account struct {
+	ID        uuid.UUID
+	OwnerID   string
+	Kind      domain.AccountKind
+	Currency  string
+	CreatedAt time.Time
+}
+
+// LedgerEntry is one line of an account statement.
+type LedgerEntry struct {
+	ID          int64
+	TransferID  uuid.UUID
+	AmountCents int64
+	CreatedAt   time.Time
+}
+
+// EntriesPage is one page of a statement. NextAfter is set only when more
+// entries exist; pass it as the cursor of the next request.
+type EntriesPage struct {
+	Entries   []LedgerEntry
+	NextAfter *int64
+}
+
+// AccountStore is the port for account persistence. FindByID must return
+// domain.ErrAccountNotFound and Create must return
+// domain.ErrAccountAlreadyExists when applicable.
+type AccountStore interface {
+	Create(ctx context.Context, a Account) error
+	FindByID(ctx context.Context, id uuid.UUID) (Account, error)
+}
+
+// LedgerReader is the port for reading the ledger. There is no stored
+// balance: SumByAccount IS the balance.
+type LedgerReader interface {
+	SumByAccount(ctx context.Context, accountID uuid.UUID) (domain.Money, error)
+	ListByAccount(ctx context.Context, accountID uuid.UUID, afterID int64, limit int) ([]LedgerEntry, error)
+}
+
+// AccountService covers account creation and the read side.
+type AccountService struct {
+	accounts AccountStore
+	ledger   LedgerReader
+}
+
+// cash
+// CashCommand is a deposit or withdrawal request.
+type CashCommand struct {
+	Key         IdempotencyKey
+	Fingerprint string
+	AccountID   uuid.UUID
+	AmountCents int64
+}
+
+// CashService models deposits and withdrawals as transfers against the
+// system account, so they get the same atomicity and idempotency for free.
+type CashService struct {
+	transfers       *TransferService
+	systemAccountID uuid.UUID
 }

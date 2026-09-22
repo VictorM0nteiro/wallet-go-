@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/VictorM0nteiro/wallet-go/internal/app"
 	"github.com/VictorM0nteiro/wallet-go/internal/domain"
 )
 
@@ -17,8 +18,8 @@ func TestAccountAndEntryRepositories_DepositEndToEnd(t *testing.T) {
 	accounts := NewAccountRepository(pool)
 	entries := NewEntryRepository(pool)
 
-	system := Account{ID: uuid.New(), OwnerID: "system", Kind: domain.AccountKindSystem, Currency: "BRL"}
-	customer := Account{ID: uuid.New(), OwnerID: "ana", Kind: domain.AccountKindCustomer, Currency: "BRL"}
+	system := app.Account{ID: uuid.New(), OwnerID: "system", Kind: domain.AccountKindSystem, Currency: "BRL"}
+	customer := app.Account{ID: uuid.New(), OwnerID: "ana", Kind: domain.AccountKindCustomer, Currency: "BRL"}
 
 	if err := accounts.Create(ctx, system); err != nil {
 		t.Fatalf("create system account: %v", err)
@@ -71,7 +72,7 @@ func TestAccountRepository_FindByID_NotFound(t *testing.T) {
 	accounts := NewAccountRepository(pool)
 
 	_, err := accounts.FindByID(ctx, uuid.New())
-	if !errors.Is(err, ErrAccountNotFound) {
+	if !errors.Is(err, domain.ErrAccountNotFound) {
 		t.Fatalf("err = %v, want ErrAccountNotFound", err)
 	}
 }

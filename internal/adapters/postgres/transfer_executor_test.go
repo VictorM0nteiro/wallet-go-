@@ -14,7 +14,7 @@ import (
 
 func newTestAccount(t *testing.T, repo *AccountRepository, owner string, kind domain.AccountKind) uuid.UUID {
 	t.Helper()
-	a := Account{ID: uuid.New(), OwnerID: owner, Kind: kind, Currency: "BRL"}
+	a := app.Account{ID: uuid.New(), OwnerID: owner, Kind: kind, Currency: "BRL"}
 	if err := repo.Create(context.Background(), a); err != nil {
 		t.Fatalf("create account %q: %v", owner, err)
 	}

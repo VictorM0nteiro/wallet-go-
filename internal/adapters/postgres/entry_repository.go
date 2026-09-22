@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/VictorM0nteiro/wallet-go/internal/app"
 	"github.com/VictorM0nteiro/wallet-go/internal/domain"
 )
 
@@ -82,4 +83,37 @@ func (r *EntryRepository) SumByAccount(ctx context.Context, accountID uuid.UUID)
 	}
 
 	return domain.NewMoney(sum), nil
+}
+
+// ListByAccount returns up to limit entries of accountID with id > afterID,
+// oldest first. It is served by entries_account_idx (account_id, id).
+func (r *EntryRepository) ListByAccount(ctx context.Context, accountID uuid.UUID, afterID int64, limit int) ([]app.LedgerEntry, error) {
+	ctx, cancel := r.pool.withAcquireTimeout(ctx)
+	defer cancel()
+
+	const query = `
+              SELECT id, transfer_id, amount_cents, created_at
+              FROM entries
+              WHERE account_id = $1 AND id > $2
+              ORDER BY id
+              LIMIT $3
+      `
+	rows, err := r.pool.Query(ctx, query, accountID, afterID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: list entries: %w", err)
+	}
+	defer rows.Close()
+
+	var out []app.LedgerEntry
+	for rows.Next() {
+		var e app.LedgerEntry
+		if err := rows.Scan(&e.ID, &e.TransferID, &e.AmountCents, &e.CreatedAt); err != nil {
+			return nil, fmt.Errorf("postgres: scan entry: %w", err)
+		}
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("postgres: list entries: %w", err)
+	}
+	return out, nil
 }

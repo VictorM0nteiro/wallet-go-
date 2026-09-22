@@ -22,4 +22,8 @@ var (
 	// ErrAccountNotFound is returned when a transfer references an account
 	// that does not exist.
 	ErrAccountNotFound = errors.New("domain: account not found")
+
+	// ErrAccountAlreadyExists is returned when an owner already has an
+	// account of the same kind and currency.
+	ErrAccountAlreadyExists = errors.New("domain: account already exists")
 )
