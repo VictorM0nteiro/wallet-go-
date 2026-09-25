@@ -251,6 +251,56 @@ entre execuções repetidas.
 **Armadilhas:** medir com o próprio harness competindo por CPU com o serviço na mesma
 máquina. Registre isso como limitação; se tiver WSL2 ou uma VM, prefira medir lá.
 
+### Pendências herdadas do loadtest preliminar
+
+Um primeiro gerador já existe em `cmd/loadtest` (uso em `docs/loadtest.md`), criado
+na Sessão 5 para forçar a API até quebrar. Rodado em 2026-09 na máquina de
+desenvolvimento (Windows, Docker Desktop, gerador e API no mesmo host), ele deixou
+estas pendências, que devem ser resolvidas aqui e não antes:
+
+**Corrigir a ferramenta**
+
+- [ ] **Separar o tipo de falha.** Hoje todas as "quebras" foram `connection_refused`
+  (camada TCP, antes de a requisição chegar à aplicação); em nenhuma das 5 execuções
+  houve um único `5xx`. No `read`, ele "quebrou" em 1024 workers com p99 de 217 ms.
+  Relatar falha de conexão, falha de status e limite de latência como causas
+  distintas, para o veredito não misturar limite do cliente ou do SO com saturação da API.
+- [ ] **Escalonar o início dos workers** (ou pré-aquecer as conexões) dentro de cada
+  estágio. Hipótese, ainda não verificada: ~250 conexões novas de uma vez estouram a
+  fila de `accept` do Windows (~200). As recusas apareceram em todas as execuções
+  exatamente no estágio de 512 workers (134 a 232). Se sumirem ao escalonar, era artefato.
+- [ ] Taxa alvo, seed registrada e saída em arquivo (CSV ou JSON), como pedem os
+  itens acima. O preliminar só imprime no terminal e usa seed baseada no relógio.
+
+**Explicar o que ainda não se sabe** (a análise é sua, o Claude Code não escreve a conclusão)
+
+- [ ] **Por que o `hot` piora com mais workers?** Observado: 302 req/s com 8 workers,
+  162 a 190 com 128 a 512, apesar de o pool limitar o Postgres a 10 transações
+  simultâneas. Escrever a hipótese antes. Experimento: `-start 10 -max 10` contra
+  `-start 128 -max 128`, olhando `pg_stat_activity` (wait events) durante a execução.
+- [ ] **Por que `spread` (~1.200 req/s) é ~5x mais lento que `read` (~6.500 req/s)?**
+  Suspeita: custo de commit (fsync do WAL, lento no Docker Desktop). Prova possível:
+  uma execução com `synchronous_commit=off`, usada só como experimento e registrada
+  como tal, nunca como configuração final.
+- [ ] **O `503` do `AcquireTimeout` (3 s) nunca foi observado.** No `hot` o p99 parou
+  em 2,95 s, colado no limite, e a ferramenta parou antes por causa das recusas de
+  conexão. Provocar de propósito (mais workers, com a correção acima) e confirmar que
+  o comportamento é falhar rápido com `503`, não pendurar.
+
+**Metodologia**
+
+- [ ] **Ruído acima de 15%.** Mesma configuração, execuções diferentes: `hot` com 128
+  workers deu 162 e 252 req/s; `spread` com 8 workers, 1.065 e 1.292. Pelo plano,
+  variação acima de 15% entre repetições significa mudar o ambiente de medição (WSL2
+  ou VM) antes de aumentar as repetições. Medir com 3 repetições por configuração.
+- [ ] **Registrar o tamanho do banco** em cada execução (o volume chegou a ~900 MB
+  depois dos testes preliminares). O `SUM` do saldo varre as entries da conta, então
+  banco cheio pode mudar os números do cenário de leitura.
+- [ ] Resultado preliminar que **não deve ser citado como conclusão**: "a API quebra
+  em 512 workers". O que os dados preliminares sustentam: sob contenção alta a API
+  degrada por fila (p50 ≈ workers / rps, sem erros de aplicação), e o ledger ficou
+  consistente em todas as execuções.
+
 ---
 
 ## Sessão 8 — segunda estratégia
