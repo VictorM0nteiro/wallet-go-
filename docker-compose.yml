@@ -15,5 +15,28 @@ services:
       timeout: 3s
       retries: 10
 
+  migrate:
+    image: migrate/migrate:v4.18.1
+    profiles: ["tools"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/migrations
+    command:
+      ["-path", "/migrations", "-database", "postgres://wallet:wallet@postgres:5432/wallet?sslmode=disable", "up"]
+
+  app:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://wallet:wallet@postgres:5432/wallet?sslmode=disable
+      WALLET_API_KEY: dev-key
+      LISTEN_ADDR: :8080
+    ports:
+      - "8080:8080"
+
 volumes:
   wallet_pgdata:

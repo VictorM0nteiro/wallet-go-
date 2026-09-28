@@ -3,19 +3,48 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 
 	httpapi "github.com/VictorM0nteiro/wallet-go/internal/adapters/http"
 	"github.com/VictorM0nteiro/wallet-go/internal/adapters/postgres"
 	"github.com/VictorM0nteiro/wallet-go/internal/app"
 )
+
+type config struct {
+	dsn    string
+	apiKey string
+	addr   string
+}
+
+func loadConfig() (config, error) {
+	dsn, apiKey := os.Getenv("DATABASE_URL"), os.Getenv("WALLET_API_KEY")
+	if dsn == "" || apiKey == "" {
+		return config{}, errors.New("DATABASE_URL and WALLET_API_KEY must be set")
+	}
+	if _, err := pgxpool.ParseConfig(dsn); err != nil {
+		return config{}, fmt.Errorf("DATABASE_URL is invalid: %w", err)
+	}
+
+	addr := os.Getenv("LISTEN_ADDR")
+	if addr == "" {
+		addr = ":8080"
+	}
+	if !strings.Contains(addr, ":") {
+		return config{}, fmt.Errorf("LISTEN_ADDR must be host:port or :port, got %q", addr)
+	}
+
+	return config{dsn: dsn, apiKey: apiKey, addr: addr}, nil
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -32,19 +61,15 @@ func run() error {
 	// (production, CI), the process just reads from the real environment.
 	_ = godotenv.Load()
 
-	dsn, apiKey := os.Getenv("DATABASE_URL"), os.Getenv("WALLET_API_KEY")
-	if dsn == "" || apiKey == "" {
-		return errors.New("DATABASE_URL and WALLET_API_KEY must be set")
-	}
-	addr := os.Getenv("LISTEN_ADDR")
-	if addr == "" {
-		addr = ":8080"
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
 	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
 	pool, err := postgres.NewPool(ctx, postgres.PoolConfig{
-		DSN:             dsn,
+		DSN:             cfg.dsn,
 		MaxConns:        10,
 		MaxConnLifetime: 30 * time.Minute,
 		AcquireTimeout:  3 * time.Second,
@@ -52,6 +77,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// Runs after srv.Shutdown below returns, so in-flight requests still
+	// using the pool have already drained: stop accepting -> drain -> close
+	// the pool -> exit.
 	defer pool.Close()
 
 	accountRepo := postgres.NewAccountRepository(pool)
@@ -63,12 +91,13 @@ func run() error {
 
 	transfers := app.NewTransferService(postgres.NewLockingTransferExecutor(pool))
 	srv := &http.Server{
-		Addr: addr,
+		Addr: cfg.addr,
 		Handler: httpapi.NewRouter(httpapi.Deps{
 			Accounts:       app.NewAccountService(accountRepo, entryRepo),
 			Cash:           app.NewCashService(transfers, systemID),
 			Transfers:      transfers,
-			APIKey:         apiKey,
+			DB:             pool,
+			APIKey:         cfg.apiKey,
 			RequestTimeout: 5 * time.Second,
 			Logger:         logger,
 		}),
@@ -80,7 +109,7 @@ func run() error {
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
-	logger.Info("wallet: listening", "addr", addr)
+	logger.Info("wallet: listening", "addr", cfg.addr)
 
 	select {
 	case err := <-errCh:
@@ -91,5 +120,8 @@ func run() error {
 	logger.Info("wallet: shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	return srv.Shutdown(shutdownCtx)
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("graceful shutdown: %w", err)
+	}
+	return nil
 }

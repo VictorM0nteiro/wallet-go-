@@ -15,12 +15,13 @@ type Deps struct {
 	Accounts       accountService
 	Cash           cashService
 	Transfers      transferService
+	DB             Pinger
 	APIKey         string
 	RequestTimeout time.Duration
 	Logger         *slog.Logger
 }
 
-// NewRouter wires the six endpoints and the middleware chain.
+// NewRouter wires the six endpoints, health checks, and the middleware chain.
 func NewRouter(d Deps) http.Handler {
 	h := &Handler{
 		accounts:  d.Accounts,
@@ -32,6 +33,12 @@ func NewRouter(d Deps) http.Handler {
 
 	r := chi.NewRouter()
 	r.Use(requestID, accessLog(d.Logger), recoverer(d.Logger), timeout(d.RequestTimeout))
+
+	// Health checks are unauthenticated: the orchestrator polling them has
+	// no API key, and they must work even if a caller's key is wrong.
+	r.Get("/healthz", healthz)
+	r.Get("/readyz", readyz(d.DB))
+
 	r.Group(func(r chi.Router) {
 		r.Use(apiKeyAuth(d.APIKey))
 		r.Post("/accounts", h.createAccount)

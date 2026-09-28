@@ -58,14 +58,21 @@ func (f *fakeAccounts) Entries(_ context.Context, _ uuid.UUID, after int64, limi
 	return app.EntriesPage{}, nil
 }
 
+const testRequestTimeout = 2 * time.Second
+
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
 func newTestHandler(cash cashService, accounts accountService) http.Handler {
 	return NewRouter(Deps{
 		Accounts:       accounts,
 		Cash:           cash,
 		Transfers:      fakeTransfers{},
+		DB:             fakePinger{},
 		APIKey:         "secret",
-		RequestTimeout: 2 * time.Second,
-		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		RequestTimeout: testRequestTimeout,
+		Logger:         testLogger(),
 	})
 }
 
