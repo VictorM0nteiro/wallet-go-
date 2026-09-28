@@ -5,8 +5,9 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/VictorM0nteiro/wallet-go/internal/domain"
 	"github.com/google/uuid"
+
+	"github.com/VictorM0nteiro/wallet-go/internal/domain"
 )
 
 // ErrInvalidOwner is returned when an account is created without an owner.

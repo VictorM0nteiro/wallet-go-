@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -85,7 +86,7 @@ func recoverer(logger *slog.Logger) func(http.Handler) http.Handler {
 				if rec == nil {
 					return
 				}
-				if rec == http.ErrAbortHandler {
+				if err, ok := rec.(error); ok && errors.Is(err, http.ErrAbortHandler) {
 					panic(rec)
 				}
 				logger.Error("panic recovered",

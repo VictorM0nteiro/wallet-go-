@@ -70,7 +70,7 @@ func newTestHandler(cash cashService, accounts accountService) http.Handler {
 }
 
 func doRequest(h http.Handler, method, path, body string, headers map[string]string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), method, path, strings.NewReader(body))
 	req.Header.Set("X-API-Key", "secret")
 	for k, v := range headers {
 		req.Header.Set(k, v)
