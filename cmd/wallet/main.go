@@ -70,7 +70,7 @@ func run() error {
 
 	pool, err := postgres.NewPool(ctx, postgres.PoolConfig{
 		DSN:             cfg.dsn,
-		MaxConns:        10,
+		MaxConns:        30,
 		MaxConnLifetime: 30 * time.Minute,
 		AcquireTimeout:  3 * time.Second,
 	})
