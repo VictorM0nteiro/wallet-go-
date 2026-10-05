@@ -1,5 +1,6 @@
 // Command loadtest ramps up load against a locally running wallet-go API
-// until it breaks, then checks that the ledger is still consistent.
+// until it breaks, or until the host runs out of the CPU or RAM budget,
+// then checks that the ledger is still consistent.
 package main
 
 import (
@@ -16,14 +17,29 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/joho/godotenv"
+	"github.com/shirou/gopsutil/v4/cpu"
+	"github.com/shirou/gopsutil/v4/mem"
 )
 
 const fundingCents int64 = 1_000_000_000
+
+type options struct {
+	base, key, scenario   string
+	stage, ramp, p99Limit time.Duration
+	start, maxW, accounts int
+	errLimit, rate        float64
+	cpuLimit, ramLimit    float64
+	seed                  int64
+}
 
 type client struct {
 	base string
@@ -176,12 +192,64 @@ func classify(err error) string {
 	}
 }
 
+// resourceGuard samples host CPU and RAM while load runs and trips when one
+// of them exceeds its limit. It is host-wide on purpose: the generator, the
+// API and PostgreSQL all compete for the same machine, so the budget is the
+// machine's, not the process's. A limit of 0 disables that check.
+type resourceGuard struct {
+	cpuLimit float64
+	ramLimit float64
+	tripped  atomic.Bool
+	mu       sync.Mutex
+	reason   string
+}
+
+func (g *resourceGuard) trip(reason string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.reason == "" {
+		g.reason = reason
+	}
+	g.tripped.Store(true)
+}
+
+func (g *resourceGuard) why() string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.reason
+}
+
+// watch runs until ctx is cancelled or a limit trips. cpu.PercentWithContext
+// blocks for its sampling interval, which doubles as the loop's pacing.
+func (g *resourceGuard) watch(ctx context.Context) {
+	for ctx.Err() == nil {
+		if g.cpuLimit > 0 {
+			pct, err := cpu.PercentWithContext(ctx, 500*time.Millisecond, false)
+			if err == nil && len(pct) > 0 && pct[0] > g.cpuLimit {
+				g.trip(fmt.Sprintf("host CPU %.1f%% above %.0f%%", pct[0], g.cpuLimit))
+				return
+			}
+		} else {
+			time.Sleep(500 * time.Millisecond)
+		}
+		if g.ramLimit > 0 {
+			vm, err := mem.VirtualMemoryWithContext(ctx)
+			if err == nil && vm.UsedPercent > g.ramLimit {
+				g.trip(fmt.Sprintf("host RAM %.1f%% above %.0f%%", vm.UsedPercent, g.ramLimit))
+				return
+			}
+		}
+	}
+}
+
 // runStage drives workers concurrent request loops for duration d. Workers
 // are not all started at once: their first request is staggered linearly
 // over ramp (capped to half of d), so a stage does not open hundreds of TCP
 // connections in the same instant. seed makes the sequence of accounts/pairs
-// each worker picks deterministic and reproducible across runs.
-func runStage(c *client, next func(*rand.Rand) target, workers int, d, ramp time.Duration, seed int64) stageResult {
+// each worker picks deterministic. rate (total req/s, 0 = closed loop) paces
+// each worker so the stage as a whole aims at that rate. The stage ends early
+// if guard trips.
+func runStage(c *client, next func(*rand.Rand) target, workers int, d, ramp time.Duration, seed int64, rate float64, guard *resourceGuard) stageResult {
 	if ramp > d/2 {
 		ramp = d / 2
 	}
@@ -205,10 +273,15 @@ func runStage(c *client, next func(*rand.Rand) target, workers int, d, ramp time
 			time.Sleep(startDelay)
 
 			rng := rand.New(rand.NewPCG(uint64(seed), uint64(w))) //nolint:gosec // load generator does not need crypto randomness
+			var interval time.Duration
+			if rate > 0 {
+				interval = time.Duration(float64(time.Second) * float64(workers) / rate)
+			}
+
 			var lat []time.Duration
 			statuses := map[int]int{}
 			errs := map[string]int{}
-			for time.Now().Before(deadline) {
+			for time.Now().Before(deadline) && !guard.tripped.Load() {
 				t := next(rng)
 				t0 := time.Now()
 				status, err := c.send(t)
@@ -217,6 +290,9 @@ func runStage(c *client, next func(*rand.Rand) target, workers int, d, ramp time
 					errs[classify(err)]++
 				} else {
 					statuses[status]++
+				}
+				if wait := interval - time.Since(t0); interval > 0 && wait > 0 {
+					time.Sleep(wait)
 				}
 			}
 			mu.Lock()
@@ -289,23 +365,23 @@ func (r stageResult) report() {
 		r.statuses, r.errs)
 }
 
-// verdict is the break/no-break call for one stage, with the reason kept
-// specific to which signal tripped: latency, the API's own error responses,
-// or connection-level failures (which deserve more skepticism).
+// verdict is the break/no-break call for one stage. resource marks a stop
+// caused by the host budget, which says nothing about the API's own limits.
 type verdict struct {
-	broke  bool
-	reason string
+	broke    bool
+	resource bool
+	reason   string
 }
 
 func evaluateStage(r stageResult, errLimit float64, p99Limit time.Duration) verdict {
 	if p99 := r.percentile(0.99); p99 > p99Limit {
-		return verdict{true, fmt.Sprintf("p99 latency %s is above %s", p99.Round(time.Millisecond), p99Limit)}
+		return verdict{broke: true, reason: fmt.Sprintf("p99 latency %s is above %s", p99.Round(time.Millisecond), p99Limit)}
 	}
 	if af := r.appFailureRatio(); af > errLimit {
-		return verdict{true, fmt.Sprintf("application failure ratio %.1f%% (non-2xx responses) is above %.1f%%", af*100, errLimit*100)}
+		return verdict{broke: true, reason: fmt.Sprintf("application failure ratio %.1f%% (non-2xx responses) is above %.1f%%", af*100, errLimit*100)}
 	}
 	if cf := r.connFailureRatio(); cf > errLimit {
-		return verdict{true, fmt.Sprintf("connection failure ratio %.1f%% (refused/reset/timeout) is above %.1f%% -- this can be a client/OS limit rather than API saturation, see docs/loadtest.md", cf*100, errLimit*100)}
+		return verdict{broke: true, reason: fmt.Sprintf("connection failure ratio %.1f%% (refused/reset/timeout) is above %.1f%% -- this can be a client/OS limit rather than API saturation, see docs/loadtest.md", cf*100, errLimit*100)}
 	}
 	return verdict{}
 }
@@ -322,18 +398,28 @@ func isLocal(base string) error {
 	return fmt.Errorf("refusing to load test %q: only localhost is allowed", u.Hostname())
 }
 
-// --- bench report (docs/bench/<scenario>-<seed>.json) ---
+// --- bench report (docs/bench/<scenario>-seed<seed>-<timestamp>.json) ---
 
 type benchReport struct {
 	Timestamp   time.Time         `json:"timestamp"`
 	Scenario    string            `json:"scenario"`
 	Seed        int64             `json:"seed"`
+	Environment benchEnvironment  `json:"environment"`
 	Params      benchParams       `json:"params"`
 	Stages      []benchStage      `json:"stages"`
-	BrokeAt     int               `json:"broke_at_workers,omitempty"`
-	BrokeReason string            `json:"broke_reason,omitempty"`
+	StopKind    string            `json:"stop_kind"`
+	StopReason  string            `json:"stop_reason,omitempty"`
 	RecoveredIn string            `json:"recovered_in,omitempty"`
 	Consistency *benchConsistency `json:"consistency,omitempty"`
+}
+
+type benchEnvironment struct {
+	OS              string `json:"os"`
+	Arch            string `json:"arch"`
+	NumCPU          int    `json:"num_cpu"`
+	GoVersion       string `json:"go_version"`
+	PostgresVersion string `json:"postgres_version"`
+	DBSizeBytes     int64  `json:"db_size_bytes"`
 }
 
 type benchParams struct {
@@ -343,8 +429,11 @@ type benchParams struct {
 	StartWorkers  int     `json:"start_workers"`
 	MaxWorkers    int     `json:"max_workers"`
 	Accounts      int     `json:"accounts"`
+	Rate          float64 `json:"rate"`
 	ErrLimit      float64 `json:"err_limit"`
 	P99Limit      string  `json:"p99_limit"`
+	CPULimit      float64 `json:"cpu_limit"`
+	RAMLimit      float64 `json:"ram_limit"`
 }
 
 type benchStage struct {
@@ -395,9 +484,32 @@ func toBenchStage(r stageResult, v verdict) benchStage {
 	}
 }
 
-// writeBenchReport saves one JSON file per execution under docs/bench/,
-// named after the scenario and seed so a run is identifiable and, modulo
-// live timing, repeatable (go run ./cmd/loadtest ... -seed <seed>).
+// captureEnvironment records where and on what the numbers were produced.
+// It deliberately skips the hostname and the DSN: docs/bench/ is committed to
+// a public repository, and the DSN contains a password.
+func captureEnvironment(ctx context.Context, dsn string) (benchEnvironment, error) {
+	env := benchEnvironment{
+		OS:        runtime.GOOS,
+		Arch:      runtime.GOARCH,
+		NumCPU:    runtime.NumCPU(),
+		GoVersion: runtime.Version(),
+	}
+	if dsn == "" {
+		return env, errors.New("DATABASE_URL not set, postgres fields left empty")
+	}
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		return env, err
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	err = conn.QueryRow(ctx, `SELECT version(), pg_database_size(current_database())`).
+		Scan(&env.PostgresVersion, &env.DBSizeBytes)
+	return env, err
+}
+
+// writeBenchReport saves one JSON file per execution under docs/bench/. The
+// timestamp in the name keeps repeated runs with the same seed from
+// overwriting each other.
 func writeBenchReport(rep benchReport) (string, error) {
 	dir := filepath.Join("docs", "bench")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -415,41 +527,45 @@ func writeBenchReport(rep benchReport) (string, error) {
 }
 
 func main() {
-	var (
-		base      = flag.String("base", "http://localhost:8080", "API base URL (localhost only)")
-		key       = flag.String("key", "dev-key", "API key")
-		scenario  = flag.String("scenario", "hot", "hot (all transfers on 2 accounts) | spread (transfers across -accounts accounts) | read (balance reads)")
-		stage     = flag.Duration("stage", 10*time.Second, "duration of each load stage")
-		ramp      = flag.Duration("ramp", time.Second, "time to linearly stagger worker start within each stage (capped to half -stage)")
-		start     = flag.Int("start", 8, "workers in the first stage (doubles every stage)")
-		maxW      = flag.Int("max", 512, "maximum workers")
-		nAccounts = flag.Int("accounts", 100, "accounts used by the spread and read scenarios")
-		errLimit  = flag.Float64("err-limit", 0.05, "failure ratio (checked separately for app and connection failures) that counts as broken")
-		p99Limit  = flag.Duration("p99-limit", 2*time.Second, "p99 latency that counts as broken")
-		seed      = flag.Int64("seed", 0, "PRNG seed for account/pair selection; 0 derives one from the current time and prints it")
-	)
+	_ = godotenv.Load()
+
+	var o options
+	flag.StringVar(&o.base, "base", "http://localhost:8080", "API base URL (localhost only)")
+	flag.StringVar(&o.key, "key", "dev-key", "API key")
+	flag.StringVar(&o.scenario, "scenario", "hot", "hot (all transfers on 2 accounts) | spread (transfers across -accounts accounts) | read (balance reads)")
+	flag.DurationVar(&o.stage, "stage", 10*time.Second, "duration of each load stage")
+	flag.DurationVar(&o.ramp, "ramp", time.Second, "time to linearly stagger worker start within each stage (capped to half -stage)")
+	flag.IntVar(&o.start, "start", 8, "workers in the first stage (doubles every stage)")
+	flag.IntVar(&o.maxW, "max", 512, "maximum workers")
+	flag.IntVar(&o.accounts, "accounts", 100, "accounts used by the spread and read scenarios")
+	flag.Float64Var(&o.errLimit, "err-limit", 0.05, "failure ratio (checked separately for app and connection failures) that counts as broken")
+	flag.DurationVar(&o.p99Limit, "p99-limit", 2*time.Second, "p99 latency that counts as broken")
+	flag.Float64Var(&o.rate, "rate", 0, "target total requests/s across all workers; 0 = closed loop, as fast as possible")
+	flag.Float64Var(&o.cpuLimit, "cpu-limit", 100, "stop when host CPU usage (%) exceeds this; 0 disables")
+	flag.Float64Var(&o.ramLimit, "ram-limit", 90, "stop when host RAM usage (%) exceeds this; 0 disables")
+	flag.Int64Var(&o.seed, "seed", 0, "PRNG seed for account/pair selection; 0 derives one from the current time and prints it")
 	flag.Parse()
 
-	if err := run(*base, *key, *scenario, *stage, *ramp, *start, *maxW, *nAccounts, *errLimit, *p99Limit, *seed); err != nil {
+	if err := run(o); err != nil {
 		fmt.Fprintln(os.Stderr, "loadtest:", err)
 		os.Exit(1)
 	}
 }
 
-func run(base, key, scenario string, stage, ramp time.Duration, start, maxW, nAccounts int, errLimit float64, p99Limit time.Duration, seed int64) error {
-	if err := isLocal(base); err != nil {
+func run(o options) error {
+	if err := isLocal(o.base); err != nil {
 		return err
 	}
-	if start < 1 || maxW < start {
+	if o.start < 1 || o.maxW < o.start {
 		return errors.New("need 1 <= -start <= -max")
 	}
-	if seed == 0 {
-		seed = time.Now().UnixNano()
+	if o.seed == 0 {
+		o.seed = time.Now().UnixNano()
 	}
-	fmt.Printf("Seed: %d (pass -seed %d to repeat the account/pair selection of this run)\n", seed, seed)
+	fmt.Printf("Seed: %d (pass -seed %d to repeat the account/pair selection of this run)\n", o.seed, o.seed)
 
-	n := nAccounts
-	switch scenario {
+	n := o.accounts
+	switch o.scenario {
 	case "hot":
 		n = 2
 	case "spread", "read":
@@ -457,16 +573,21 @@ func run(base, key, scenario string, stage, ramp time.Duration, start, maxW, nAc
 			return errors.New("-accounts must be at least 2")
 		}
 	default:
-		return fmt.Errorf("unknown scenario %q", scenario)
+		return fmt.Errorf("unknown scenario %q", o.scenario)
 	}
 
-	c := newClient(base, key, maxW)
+	env, envErr := captureEnvironment(context.Background(), os.Getenv("DATABASE_URL"))
+	if envErr != nil {
+		fmt.Fprintln(os.Stderr, "loadtest: warning: environment:", envErr)
+	}
+
+	c := newClient(o.base, o.key, o.maxW)
 	// runID only namespaces account owners and idempotency keys so repeat
-	// runs (including repeats with the same -seed, for reproducibility)
-	// never collide with accounts a previous run already created.
+	// runs (including repeats with the same -seed) never collide with
+	// accounts a previous run already created.
 	runID := time.Now().UnixNano()
 
-	fmt.Printf("Setting up %d funded accounts (scenario %q)...\n", n, scenario)
+	fmt.Printf("Setting up %d funded accounts (scenario %q)...\n", n, o.scenario)
 	ids := make([]string, n)
 	for i := range ids {
 		id, err := c.createAccount(fmt.Sprintf("load-%d-%d", runID, i))
@@ -490,7 +611,7 @@ func run(base, key, scenario string, stage, ramp time.Duration, start, maxW, nAc
 		}
 	}
 	var next func(*rand.Rand) target
-	switch scenario {
+	switch o.scenario {
 	case "hot":
 		next = func(*rand.Rand) target { return transfer(ids[0], ids[1]) }
 	case "spread":
@@ -505,44 +626,70 @@ func run(base, key, scenario string, stage, ramp time.Duration, start, maxW, nAc
 		}
 	}
 
-	fmt.Printf("Ramping up: %d workers, doubling every %s (staggered over %s) until app or connection failures exceed %.0f%% or p99 > %s (max %d workers)\n\n",
-		start, stage, ramp, errLimit*100, p99Limit, maxW)
-
-	report := benchReport{
-		Timestamp: time.Now(),
-		Scenario:  scenario,
-		Seed:      seed,
-		Params: benchParams{
-			Base:          base,
-			StageDuration: stage.String(),
-			RampUp:        ramp.String(),
-			StartWorkers:  start,
-			MaxWorkers:    maxW,
-			Accounts:      n,
-			ErrLimit:      errLimit,
-			P99Limit:      p99Limit.String(),
-		},
+	guard := &resourceGuard{cpuLimit: o.cpuLimit, ramLimit: o.ramLimit}
+	watchCtx, stopWatch := context.WithCancel(context.Background())
+	defer stopWatch()
+	if o.cpuLimit > 0 || o.ramLimit > 0 {
+		if pct, err := cpu.PercentWithContext(watchCtx, 500*time.Millisecond, false); err == nil && len(pct) > 0 {
+			if vm, err := mem.VirtualMemory(); err == nil {
+				fmt.Printf("Baseline host usage: CPU %.1f%%, RAM %.1f%% (limits: CPU %.0f%%, RAM %.0f%%, 0 = disabled)\n",
+					pct[0], vm.UsedPercent, o.cpuLimit, o.ramLimit)
+			}
+		}
+		go guard.watch(watchCtx)
 	}
 
-	brokeAt, why := 0, ""
-	for w := start; w <= maxW; w *= 2 {
-		res := runStage(c, next, w, stage, ramp, seed)
+	fmt.Printf("Ramping up: %d workers, doubling every %s (staggered over %s) until app or connection failures exceed %.0f%%, p99 > %s, or host CPU/RAM pass their limits (max %d workers)\n\n",
+		o.start, o.stage, o.ramp, o.errLimit*100, o.p99Limit, o.maxW)
+
+	report := benchReport{
+		Timestamp:   time.Now(),
+		Scenario:    o.scenario,
+		Seed:        o.seed,
+		Environment: env,
+		Params: benchParams{
+			Base:          o.base,
+			StageDuration: o.stage.String(),
+			RampUp:        o.ramp.String(),
+			StartWorkers:  o.start,
+			MaxWorkers:    o.maxW,
+			Accounts:      n,
+			Rate:          o.rate,
+			ErrLimit:      o.errLimit,
+			P99Limit:      o.p99Limit.String(),
+			CPULimit:      o.cpuLimit,
+			RAMLimit:      o.ramLimit,
+		},
+		StopKind: "max_workers",
+	}
+
+	for w := o.start; w <= o.maxW; w *= 2 {
+		res := runStage(c, next, w, o.stage, o.ramp, o.seed, o.rate, guard)
 		res.report()
-		v := evaluateStage(res, errLimit, p99Limit)
+		v := evaluateStage(res, o.errLimit, o.p99Limit)
+		if !v.broke && guard.tripped.Load() {
+			v = verdict{broke: true, resource: true, reason: "host resource limit: " + guard.why()}
+		}
 		report.Stages = append(report.Stages, toBenchStage(res, v))
 		if v.broke {
-			brokeAt, why = w, v.reason
-			report.BrokeAt = w
-			report.BrokeReason = why
+			report.StopReason = v.reason
+			report.StopKind = "api_broke"
+			if v.resource {
+				report.StopKind = "resource_limit"
+			}
+			fmt.Println()
+			if v.resource {
+				fmt.Printf("STOPPED at %d workers by the host budget: %s\n", w, v.reason)
+			} else {
+				fmt.Printf("BROKE at %d workers: %s\n", w, v.reason)
+			}
 			break
 		}
 	}
+	stopWatch()
 
-	fmt.Println()
-	if brokeAt == 0 {
-		fmt.Printf("The API did NOT break up to %d workers.\n", maxW)
-	} else {
-		fmt.Printf("BROKE at %d workers: %s\n", brokeAt, why)
+	if report.StopKind == "max_workers" {
+		fmt.Printf("\nThe API did NOT break up to %d workers.\n", o.maxW)
 	}
 
 	fmt.Println("\nWaiting for the API to recover...")

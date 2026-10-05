@@ -171,3 +171,9 @@ How to interpret typical patterns:
   the measurement phase.
 - **Fixed 1-cent transfers and 1,000,000,000-cent funding.** Balances never run
   out, so `422 insufficient_funds` does not appear in these runs.
+
+## Resultados
+
+Os resultados medidos até aqui, com as ressalvas de ambiente e o que ainda falta medir,
+estão em [docs/bench/RESULTS.md](bench/RESULTS.md). Os relatórios JSON de cada execução
+ficam em `docs/bench/`.
