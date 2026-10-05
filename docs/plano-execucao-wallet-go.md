@@ -386,6 +386,105 @@ ficam no texto.** A divergência é o produto.
 
 ---
 
+---
+
+# EXTRAS PÓS-FASE E — inspirados no backend-go-challenge
+
+Itens que o desafio da Jungle Gaming (`backendgo-challenge/`) exige e que cabem no modelo
+do wallet sem trocar a tese central (saldo derivado, sem broker, API key estática). Só
+começam depois da Fase E. Ordem sugerida: reversão, reconciliação, três instâncias,
+outbox, chave de negócio, e por último o exercício de Fx.
+
+## X1 — Reversão (`ROLLBACK`/`REFUND`) sem estorno duplicado
+
+- Um transfer de estorno aponta para o `transfer_id` original. Migration nova
+  (`000002`), com `reverses_transfer_id UUID UNIQUE REFERENCES transfers(id)`, para
+  impedir dois estornos bem-sucedidos da mesma operação no banco, não só na aplicação.
+- Estorno que exigiria mais saldo do que o disponível vira rejeição com código próprio,
+  diferente de `insufficient_funds`, e fica auditável.
+- O valor do estorno é igual ao valor original. Reversão parcial fica fora.
+
+**Pronto quando:** dois estornos concorrentes da mesma transferência resultam em um só,
+verificado por teste de concorrência, e a invariante de soma zero continua valendo.
+
+## X2 — Códigos de falha estáveis e documentados
+
+- Cada erro de negócio tem um código fixo (`insufficient_funds`, `same_account`, etc.),
+  listado numa tabela única em `docs/running-locally.md` e no README.
+- Os códigos não mudam de nome depois de publicados. Mudança exige nova versão da API.
+
+**Pronto quando:** a tabela existe e cada código aparece em pelo menos um teste de
+mapeamento HTTP.
+
+## X3 — Três instâncias independentes
+
+- `docker compose up --scale app=3`, com as três respondendo na mesma porta por um
+  balanceador simples (ou porta por instância, se o balanceador for complicar).
+- Requisições distribuídas entre as instâncias, com depósitos, transferências e saques
+  concorrentes. No fim, as duas invariantes da seção 3 do escopo são conferidas.
+- Responde ao critério de três processos sem ferramenta nova. Registrar a configuração
+  exata no relatório de resiliência.
+
+**Pronto quando:** a execução com três instâncias fecha as invariantes e o saldo final
+bate com a soma de créditos menos débitos.
+
+## X4 — Reconciliação
+
+- `GET /accounts/{id}/reconciliation` recalcula o saldo a partir das entries e checa as
+  duas invariantes para aquela conta.
+- O endpoint não altera nada e não lê saldo armazenado (não existe). Retorna a diferença
+  e o número de entries conferidas, nos moldes do desafio.
+- Divergência aparece na resposta e em log, sem depender de métrica.
+
+**Pronto quando:** o endpoint responde zero de diferença depois de uma carga, e uma
+divergência forçada num teste aparece como tal.
+
+## X5 — Outbox transacional sem broker
+
+- Evento de transferência concluída gravado na mesma transação do transfer. Tabela
+  `outbox` com `event_id`, tipo, payload imutável, tentativas e próximo envio.
+- Relay separado que lê por polling, marca como publicado e reenvia com backoff. A
+  mesma linha pode ser publicada duas vezes, então o `event_id` precisa ser estável.
+- Teste: interromper o relay entre publicar e marcar, reiniciar, e verificar que o
+  evento é reenviado com o mesmo `event_id`.
+
+**Pronto quando:** o cenário de interrupção acima termina com o evento entregue pelo
+menos uma vez e nunca perdido.
+
+## X6 — Chave de referência externa
+
+- Além do `Idempotency-Key`, um campo opcional `external_reference`, único por
+  `(scope, external_reference)` no banco. Uma mesma referência externa não pode gerar
+  duas operações, mesmo com chaves de idempotência diferentes.
+- Documentar a diferença entre as duas chaves: a de idempotência protege reenvio
+  técnico, a de referência protege a regra de negócio.
+
+**Pronto quando:** o mesmo `external_reference` com chave nova devolve conflito, e a
+chave original continua fazendo replay.
+
+## X7 — Composição com Uber Fx na `main`
+
+Injeção de dependência é parte do stack da vaga, então o Fx entra no projeto principal,
+não numa branch de estudo.
+
+- Trocar o composition root (`cmd/wallet/main.go`) por `fx.New`, com `fx.Provide` para
+  configuração, pool, repositórios, serviços e roteador, e `fx.Invoke` para subir o
+  servidor.
+- Usar `fx.Lifecycle` para o `srv.Shutdown` e o `pool.Close`, mantendo a ordem já
+  documentada: parar de aceitar, drenar, fechar o pool.
+- Usar `fx.Module` só onde houver uma fronteira clara (por exemplo, o adapter HTTP e o
+  adapter Postgres). Não modularizar por reflexo.
+- Os testes de integração e os de handler constroem o roteador diretamente, então não
+  dependem do Fx. Uma verificação extra com `fxtest` cobre a subida e a descida da
+  aplicação.
+- Registrar em `docs/fx-notes.md` o que o Fx resolveu, o que dificultou, e os erros de
+  injeção que apareceram no caminho.
+
+**Pronto quando:** `go run ./cmd/wallet` e `docker compose up` sobem a aplicação via Fx,
+o ciclo de `curl` da Sessão 5 passa sem alteração, e `go test -race ./...` continua verde.
+
+---
+
 ## 4. Riscos e contingência
 
 | Risco | Sinal | Resposta |
