@@ -38,6 +38,7 @@ type options struct {
 	start, maxW, accounts int
 	errLimit, rate        float64
 	cpuLimit, ramLimit    float64
+	apiMaxConns           int
 	seed                  int64
 }
 
@@ -405,6 +406,7 @@ type benchReport struct {
 	Scenario    string            `json:"scenario"`
 	Seed        int64             `json:"seed"`
 	Environment benchEnvironment  `json:"environment"`
+	Baseline    benchBaseline     `json:"baseline"`
 	Params      benchParams       `json:"params"`
 	Stages      []benchStage      `json:"stages"`
 	StopKind    string            `json:"stop_kind"`
@@ -422,7 +424,18 @@ type benchEnvironment struct {
 	DBSizeBytes     int64  `json:"db_size_bytes"`
 }
 
+// benchBaseline is the host's load measured just before the ramp starts, with
+// nothing from this run on it yet.
+type benchBaseline struct {
+	CPUPercent float64 `json:"cpu_percent"`
+	RAMPercent float64 `json:"ram_percent"`
+}
+
 type benchParams struct {
+	// APIMaxConns is what the operator declared the API was started with. The
+	// tool cannot read it from the API process, so it is a declaration, not a
+	// measurement; 0 means it was not declared.
+	APIMaxConns   int     `json:"api_max_conns_declared"`
 	Base          string  `json:"base"`
 	StageDuration string  `json:"stage_duration"`
 	RampUp        string  `json:"ramp_up"`
@@ -543,6 +556,7 @@ func main() {
 	flag.Float64Var(&o.rate, "rate", 0, "target total requests/s across all workers; 0 = closed loop, as fast as possible")
 	flag.Float64Var(&o.cpuLimit, "cpu-limit", 100, "stop when host CPU usage (%) exceeds this; 0 disables")
 	flag.Float64Var(&o.ramLimit, "ram-limit", 90, "stop when host RAM usage (%) exceeds this; 0 disables")
+	flag.IntVar(&o.apiMaxConns, "api-max-conns", 0, "MaxConns the API was started with, recorded as declared in the report (0 = not declared)")
 	flag.Int64Var(&o.seed, "seed", 0, "PRNG seed for account/pair selection; 0 derives one from the current time and prints it")
 	flag.Parse()
 
@@ -629,13 +643,16 @@ func run(o options) error {
 	guard := &resourceGuard{cpuLimit: o.cpuLimit, ramLimit: o.ramLimit}
 	watchCtx, stopWatch := context.WithCancel(context.Background())
 	defer stopWatch()
+	var baseline benchBaseline
+	if pct, err := cpu.PercentWithContext(watchCtx, 500*time.Millisecond, false); err == nil && len(pct) > 0 {
+		baseline.CPUPercent = pct[0]
+	}
+	if vm, err := mem.VirtualMemory(); err == nil {
+		baseline.RAMPercent = vm.UsedPercent
+	}
+	fmt.Printf("Baseline host usage: CPU %.1f%%, RAM %.1f%% (limits: CPU %.0f%%, RAM %.0f%%, 0 = disabled)\n",
+		baseline.CPUPercent, baseline.RAMPercent, o.cpuLimit, o.ramLimit)
 	if o.cpuLimit > 0 || o.ramLimit > 0 {
-		if pct, err := cpu.PercentWithContext(watchCtx, 500*time.Millisecond, false); err == nil && len(pct) > 0 {
-			if vm, err := mem.VirtualMemory(); err == nil {
-				fmt.Printf("Baseline host usage: CPU %.1f%%, RAM %.1f%% (limits: CPU %.0f%%, RAM %.0f%%, 0 = disabled)\n",
-					pct[0], vm.UsedPercent, o.cpuLimit, o.ramLimit)
-			}
-		}
 		go guard.watch(watchCtx)
 	}
 
@@ -647,7 +664,9 @@ func run(o options) error {
 		Scenario:    o.scenario,
 		Seed:        o.seed,
 		Environment: env,
+		Baseline:    baseline,
 		Params: benchParams{
+			APIMaxConns:   o.apiMaxConns,
 			Base:          o.base,
 			StageDuration: o.stage.String(),
 			RampUp:        o.ramp.String(),

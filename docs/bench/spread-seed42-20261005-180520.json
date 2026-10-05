@@ -1,0 +1,58 @@
+{
+  "timestamp": "2026-10-05T18:05:20.0316651-03:00",
+  "scenario": "spread",
+  "seed": 42,
+  "environment": {
+    "os": "windows",
+    "arch": "amd64",
+    "num_cpu": 12,
+    "go_version": "go1.26.0",
+    "postgres_version": "PostgreSQL 16.15 (Debian 16.15-1.pgdg13+2) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "db_size_bytes": 1500060695
+  },
+  "baseline": {
+    "cpu_percent": 10.317460317460316,
+    "ram_percent": 53
+  },
+  "params": {
+    "api_max_conns_declared": 50,
+    "base": "http://localhost:8080",
+    "stage_duration": "15s",
+    "ramp_up": "1s",
+    "start_workers": 32,
+    "max_workers": 32,
+    "accounts": 100,
+    "rate": 0,
+    "err_limit": 0.05,
+    "p99_limit": "2s",
+    "cpu_limit": 100,
+    "ram_limit": 90
+  },
+  "stages": [
+    {
+      "workers": 32,
+      "duration_ms": 15019,
+      "requests": 49392,
+      "rps": 3288.449687984767,
+      "p50_ms": 7.602,
+      "p95_ms": 20.0771,
+      "p99_ms": 28.9358,
+      "max_ms": 58.2871,
+      "statuses": {
+        "201": 49392
+      },
+      "transport_errors": {},
+      "app_failure_ratio": 0,
+      "conn_failure_ratio": 0,
+      "broke": false
+    }
+  ],
+  "stop_kind": "max_workers",
+  "recovered_in": "2ms",
+  "consistency": {
+    "passed": true,
+    "actual_cents": 100000000000,
+    "expected_cents": 100000000000,
+    "diff_cents": 0
+  }
+}

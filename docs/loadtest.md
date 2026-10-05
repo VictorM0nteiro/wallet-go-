@@ -51,6 +51,12 @@ go run ./cmd/loadtest [flags]
 | `-accounts`    | `100`                   | Accounts used by `spread` and `read`. Ignored by `hot` (always 2). |
 | `-err-limit`   | `0.05`                  | Failure ratio (0 to 1) that counts as broken.                  |
 | `-p99-limit`   | `2s`                    | p99 latency that counts as broken.                             |
+| `-ramp`        | `1s`                    | Time over which the workers of a stage are started, one by one, so connections are not opened in one burst (capped to half of `-stage`). |
+| `-rate`        | `0`                     | Target total requests/s across all workers. `0` means closed loop, as fast as possible. |
+| `-cpu-limit`   | `90`                    | Stop the run when host CPU usage (%) exceeds this. `0` disables it. |
+| `-ram-limit`   | `90`                    | Stop the run when host RAM usage (%) exceeds this. `0` disables it. |
+| `-api-max-conns` | `0`                   | The `MaxConns` the API was started with, recorded in the report as **declared**. The tool cannot read it from the API process. `0` means not declared. |
+| `-seed`        | `0`                     | Seed for account and pair selection. `0` derives one from the clock and prints it. |
 
 ### Scenarios
 
@@ -108,7 +114,8 @@ Each stage prints one line:
 |-----------|---------|
 | `workers` | Concurrent workers in that stage. |
 | `rps`     | Completed requests per second over the whole stage. |
-| `fail`    | Share of requests that were not `2xx` or hit a transport error. |
+| `app_fail` | Share of completed requests that returned a non-`2xx` status. This is the API reporting trouble. |
+| `conn_fail` | Share of attempts that never got an HTTP response (refused, reset, timeout). Ambiguous: it can be the server or the client/OS. |
 | `p50` `p95` `p99` `max` | Latency percentiles of the stage. |
 | `status`  | Count of responses per HTTP status, for example `map[201:639 503:120]`. |
 | `errs`    | Count of transport errors by kind: `client_timeout`, `connection_refused`, `connection_reset`, `transport_error`. |
