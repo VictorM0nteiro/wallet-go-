@@ -181,6 +181,6 @@ How to interpret typical patterns:
 
 ## Resultados
 
-Os resultados medidos até aqui, com as ressalvas de ambiente e o que ainda falta medir,
+The results measured so far, with the environment caveats and what is still to be measured,
 estão em [docs/bench/RESULTS.md](bench/RESULTS.md). Os relatórios JSON de cada execução
 ficam em `docs/bench/`.

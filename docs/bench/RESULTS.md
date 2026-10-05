@@ -1,76 +1,75 @@
-# Resultados de medição
+# Measurement results
 
-Registro de todos os testes de carga executados até aqui, com o que cada um mostrou e o
-que ainda não se sabe. Os relatórios JSON de cada execução estão nesta pasta e podem ser
-conferidos contra os números abaixo.
+Log of every load test run so far, with what each one showed and what is still
+unknown. The JSON report of each run is in this folder and can be checked against the
+numbers below.
 
-Os resultados são **comparações relativas entre configurações na mesma máquina**. Não
-são capacidade de produção.
+The results are **relative comparisons between configurations on the same machine**.
+They are not production capacity.
 
-## Ambiente
+## Environment
 
-| Item | Valor |
+| Item | Value |
 |---|---|
-| Processador | 6 núcleos, 12 threads (hyperthreading) |
-| Memória | ~15 GiB |
-| Sistema | Windows 11, Docker Desktop com backend WSL2 |
-| PostgreSQL | 16.15, container `postgres:16` |
-| Go | 1.26.0 (toolchain local) |
-| API e gerador | mesma máquina, sem isolamento de CPU |
+| CPU | 6 cores, 12 threads (hyperthreading) |
+| Memory | ~15 GiB |
+| OS | Windows 11, Docker Desktop with the WSL2 backend |
+| PostgreSQL | 16.15, `postgres:16` container |
+| Go | 1.26.0 (local toolchain) |
+| API and generator | same machine, no CPU isolation |
 
-## Ressalvas gerais
+## General caveats
 
-- **Ruído do host.** O gerador, a API, o Postgres e a VM do Docker dividem os mesmos
-  12 threads. A linha de base de CPU variou de 1% a 69% entre rodadas idênticas.
-- **O tamanho da pool é a variável mais fácil de errar.** A API só usa o valor novo
-  depois de ser **reconstruída** (`docker compose up -d --build app`). Por um tempo, as
-  rodadas rotuladas como "30" rodaram com 10 conexões, porque o container não tinha sido
-  reconstruído. Ver a seção 2.
-- **O JSON só registra o tamanho da pool se o operador informar** (`-api-max-conns`). Não
-  é lido da API. Quando o rótulo informado não bate com a realidade, o relatório fica
-  errado sem nenhum aviso.
-- **Versões diferentes da ferramenta.** As medições preliminares foram feitas antes do
-  escalonamento de workers, da seed e do relatório JSON. Por isso não têm arquivo nesta
-  pasta.
-- **O banco cresce.** As transferências acumulam linhas. O banco foi de ~8 MB para
-  ~268 MB ao longo destes testes, o que pode afetar o cenário `read`.
+- **Host noise.** The generator, the API, Postgres and the Docker VM share the same
+  12 threads. The CPU baseline varied from 1% to 69% between identical runs.
+- **Pool size is the easiest variable to get wrong.** The API only uses a new value after
+  it is **rebuilt** (`docker compose up -d --build app`). For a while, the runs labelled
+  "30" actually ran with 10 connections, because the container had not been rebuilt.
+  See section 2.
+- **The JSON records the pool size only if the operator declares it** (`-api-max-conns`).
+  It is not read from the API. When the declared label does not match reality, the report
+  is wrong without any warning.
+- **Different versions of the tool.** The preliminary measurements were taken before
+  worker staggering, seeding and the JSON report existed. That is why they have no file
+  in this folder.
+- **The database grows.** Transfers accumulate rows. The database went from ~8 MB to
+  ~268 MB over these tests, which can affect the `read` scenario.
 
-## 1. Testes de validação da ferramenta
+## 1. Tool validation runs
 
-Esses testes não medem o sistema. Servem para checar que a ferramenta se comporta como
-descrita.
+These runs do not measure the system. They check that the tool behaves as documented.
 
-| Arquivo | Teste | Resultado |
+| File | Test | Result |
 |---|---|---|
-| `hot-seed9-…json` | Limite de CPU de 1% | Parou sozinho na primeira etapa (8 workers) com `resource_limit`. Confirma que o observador de host dispara. |
-| `hot-seed10-…json` | `-rate 200`, 4 workers | Vazão de 193 req/s para alvo de 200. Confirma o ritmo por worker. |
+| `hot-seed9-…json` | CPU limit of 1% | Stopped by itself in the first stage (8 workers) with `resource_limit`. Confirms the host guard triggers. |
+| `hot-seed10-…json` | `-rate 200`, 4 workers | 193 req/s against a target of 200. Confirms per-worker pacing. |
 
-## 2. Pool de conexões: curva de 10 a 50
+## 2. Connection pool: curve from 10 to 50
 
-Cenário `spread` (transferências entre 100 contas), nível fixo de 32 workers, seed 42,
-etapa de 15 s. Nenhuma rodada teve erro de aplicação ou de conexão.
+Scenario `spread` (transfers between 100 accounts), fixed level of 32 workers, seed 42,
+15 s stages. No run had an application or connection error.
 
-As conexões reais de cada bloco vêm da **ordem das execuções e da reconstrução do
-container**, não do JSON. Essa é a classificação correta:
+The real connection count of each block comes from the **order of the runs and the
+container rebuilds**, not from the JSON. This is the correct classification:
 
-| Bloco | Arquivos | Conexões reais | Label no JSON | n | Mediana req/s | Média req/s | Linha de base CPU (média) |
+| Block | Files | Real connections | Label in JSON | n | Median req/s | Mean req/s | CPU baseline (mean) |
 |---|---|---|---|---|---|---|---|
-| A | `…173521` a `…174157` | 10 | sem campo | 9 | 2154 | 2179 | não registrada |
-| B | `…174932` a `…175037` | 10 | **30 (errado)** | 5 | 2477 | 2357 | ~6% |
-| C | `…175150` a `…175256` | **30** | 30 | 5 | **3667** | 3569 | ~11% |
-| D | `…175424` a `…175529` | 10 | **30 (errado)** | 5 | 2529 | 2380 | ~6% |
-| E | `…180048` a `…180153` | **20** | 20 | 5 | 3312 | 3341 | ~7% |
-| F | `…180246` a `…180352` | **40** | 40 | 5 | 3321 | 3458 | ~7% |
-| G | `…180447` a `…180553` | **50** | 50 | 5 | 3324 | 3432 | ~6% |
+| A | `…173521` to `…174157` | 10 | no field | 9 | 2154 | 2179 | not recorded |
+| B | `…174932` to `…175037` | 10 | **30 (wrong)** | 5 | 2477 | 2357 | ~6% |
+| C | `…175150` to `…175256` | **30** | 30 | 5 | **3667** | 3569 | ~11% |
+| D | `…175424` to `…175529` | 10 | **30 (wrong)** | 5 | 2529 | 2380 | ~6% |
+| E | `…180048` to `…180153` | **20** | 20 | 5 | 3312 | 3341 | ~7% |
+| F | `…180246` to `…180352` | **40** | 40 | 5 | 3321 | 3458 | ~7% |
+| G | `…180447` to `…180553` | **50** | 50 | 5 | 3324 | 3432 | ~6% |
 
-Os blocos B e D tiveram o campo `api_max_conns_declared` preenchido com 30 porque o
-argumento na linha de comando não foi atualizado quando o `MaxConns` voltou para 10. Os
-relatórios estão corretos em todos os outros campos. Os JSON não foram editados, porque
-são dados de medição. Os blocos B e D devem ser lidos como 10 conexões.
+Blocks B and D had the `api_max_conns_declared` field set to 30, because the command-line
+argument was not updated when `MaxConns` went back to 10. The reports are correct in every
+other field. The JSON files were not edited, because they are measurement data. Blocks B
+and D must be read as 10 connections.
 
-**Curva (mediana, 5 rodadas por bloco):**
+**Curve (median, 5 runs per block):**
 
-| Conexões | Mediana req/s |
+| Connections | Median req/s |
 |---|---|
 | 10 | ~2500 |
 | 20 | 3312 |
@@ -78,84 +77,85 @@ são dados de medição. Os blocos B e D devem ser lidos como 10 conexões.
 | 40 | 3321 |
 | 50 | 3324 |
 
-**Leitura:**
+**Reading:**
 
-- **De 10 para 20 conexões há o ganho que se sustenta**: de ~2500 para ~3300 req/s (+33%).
-  A diferença é grande e aparece em todos os blocos.
-- **De 20 a 50 há um platô**, em torno de 3300 a 3700 req/s. O pico de 30 (3667) fica cerca
-  de 10% acima do platô, mas essa diferença é menor que a dispersão dentro de cada bloco
-  (16 a 30%). Com os dados atuais, não dá para afirmar que 30 é melhor que 20, 40 ou 50.
-- **A linha de base não explica o platô.** Os blocos de 20, 40 e 50 tiveram CPU de fundo
-  parecida (5 a 7%), e a vazão ficou no mesmo patamar.
-- **Escolha operacional.** O `MaxConns` do código fica em **30**, que teve a maior mediana
-  da curva. A escolha não é uma prova de otimalidade: qualquer valor entre 20 e 50 está no
-  mesmo patamar, dentro do que as medições conseguem separar.
+- **From 10 to 20 connections, the gain holds**: from ~2500 to ~3300 req/s (+33%). The
+  difference is large and appears in every block.
+- **From 20 to 50 there is a plateau**, around 3300 to 3700 req/s. The peak of 30 (3667) is
+  about 10% above the plateau, but that difference is smaller than the spread inside each
+  block (16 to 30%). With the current data, it is not possible to say that 30 is better
+  than 20, 40 or 50.
+- **The CPU baseline does not explain the plateau.** The 20, 40 and 50 blocks had similar
+  background CPU (5 to 7%), and throughput stayed at the same level.
+- **Operational choice.** The `MaxConns` in the code is **30**, which had the highest
+  median of the curve. The choice is not proof of optimality: any value between 20 and 50
+  sits on the same plateau, within what these measurements can separate.
 
-**Correção de textos anteriores.** A mensagem do commit `a7bb22a` diz que o `spread` foi
-de ~1250 req/s com 10 conexões para ~2100-2700 com 30. Esses números estão errados. O
-valor de ~1250 veio de uma versão anterior da ferramenta, e o de ~2100-2700 foram
-rodadas com 10 conexões de fato. A comparação correta é a da tabela acima.
+**Correction of earlier text.** The commit message `a7bb22a` says that `spread` went from
+~1250 req/s with 10 connections to ~2100-2700 with 30. Those numbers are wrong. The ~1250
+figure came from an earlier version of the tool, and the ~2100-2700 figure came from runs
+with 10 connections. The correct comparison is the table above.
 
-## 3. Cenário `hot` (todas as transferências na mesma conta)
+## 3. Scenario `hot` (all transfers on the same account)
 
-| Conexões | Relatório | Etapas (workers: req/s, p99) | Parada |
+| Connections | Report | Stages (workers: req/s, p99) | Stop |
 |---|---|---|---|
-| 10 | `…1791231999…` | 8: 514, 19 ms · 16: 385, 47 ms · 32: 326, 111 ms · 64: 319, 246 ms · 128: 309, 440 ms · 256: 285, 934 ms · 512: 258, 2030 ms | API (p99 > 2 s) em 512 |
-| 10 (rótulo do JSON: 30) | `…1791232403…` | 8: 508, 19 ms · 16: 391, 47 ms · 32: 324, 110 ms · 64: 284, 268 ms · 128: 260, 526 ms · 256: 318, 835 ms · 512: 271, 2330 ms | API (p99 > 2 s) em 512 |
+| 10 | `…1791231999…` | 8: 514, 19 ms · 16: 385, 47 ms · 32: 326, 111 ms · 64: 319, 246 ms · 128: 309, 440 ms · 256: 285, 934 ms · 512: 258, 2030 ms | API (p99 > 2 s) at 512 |
+| 10 (JSON label: 30) | `…1791232403…` | 8: 508, 19 ms · 16: 391, 47 ms · 32: 324, 110 ms · 64: 284, 268 ms · 128: 260, 526 ms · 256: 318, 835 ms · 512: 271, 2330 ms | API (p99 > 2 s) at 512 |
 
-**Leitura:** a vazão fica em torno de 300 req/s com qualquer tamanho de pool. O gargalo é
-o lock da linha da conta, que serializa as transferências. Mais conexões não ajudam aqui,
-e o p99 cresce linearmente com os workers, como previsto pela lei de Little.
+**Reading:** throughput stays around 300 req/s whatever the pool size. The bottleneck is the
+lock on the account row, which serializes the transfers. More connections do not help
+here, and p99 grows linearly with the workers, as predicted by Little's law.
 
-Os dois relatórios de `hot` foram feitos com 10 conexões de fato. O segundo teve o campo
-`api_max_conns_declared` gravado como 30, mas o container ainda não tinha sido
-reconstruído. Por ser um cenário limitado por lock, a conclusão não muda, mas o rótulo
-precisa ser lido como 10.
+Both `hot` reports ran with 10 connections in fact. The second one had the
+`api_max_conns_declared` field recorded as 30, but the container had not been rebuilt.
+Since this scenario is limited by the lock, the conclusion holds, but the label must be
+read as 10.
 
-## 4. Teto do banco com `pgbench`
+## 4. Database ceiling with `pgbench`
 
-Workload padrão (TPC-B), escala 10, 30 s por rodada, 4 threads de cliente, executado
-dentro do container do Postgres num banco separado (`pgbench_test`).
+Standard workload (TPC-B), scale 10, 30 s per run, 4 client threads, run inside the
+Postgres container in a separate database (`pgbench_test`).
 
-| Clientes | tps médio | latência média |
+| Clients | Mean tps | Mean latency |
 |---|---|---|
 | 8 | 2687 | 3.0 ms |
 | 16 | 3380 | 4.7 ms |
 | 32 | 2567 | 12.5 ms |
 
-**Leitura e ressalva:** o `pgbench` mediu cerca de 2500 a 3400 tps nesta máquina, em
-outro momento e com outra ferramenta. A API chegou a ~3300 a 3700 req/s com 20 a 50
-conexões, então **esse número não é um teto confiável**, e não dá para afirmar que a API
-está no limite do banco. Para usar o `pgbench` como referência, ele precisa ser repetido
-nas mesmas condições (host ocioso, mesma janela de tempo) antes de qualquer comparação.
+**Reading and caveat:** `pgbench` measured about 2500 to 3400 tps on this machine, at a
+different time and with a different tool. The API reached ~3300 to 3700 req/s with 20 to 50
+connections, so **this number is not a reliable ceiling**, and it is not possible to claim
+that the API is at the database limit. To use `pgbench` as a reference, it has to be
+repeated under the same conditions (idle host, same time window) before any comparison.
 
-## 5. Medições preliminares (sem relatório JSON)
+## 5. Preliminary measurements (no JSON report)
 
-Feitas com a versão inicial da ferramenta, antes de escalonar workers. Os números são
-da saída do terminal.
+Taken with the first version of the tool, before worker staggering. The numbers come from
+the terminal output.
 
-- **`hot`, 10 conexões, 512 workers:** 192 req/s, com 5,5% de `connection_refused`. Esse
-  foi o primeiro indício de que a falha era de conexão e não de latência.
-- **`spread`, 10 conexões, 32 workers:** 1293 e 1216 req/s em duas rodadas. Estes são
-  números de uma versão antiga da ferramenta e não devem ser comparados diretamente com
-  as seções 2 e 4.
-- **`read`, 10 conexões:** cerca de 6300 a 6900 req/s entre 8 e 1024 workers, com
-  `connection_refused` acima de 512.
-- **`hot` com `-max 5000`, 30 s por etapa:** 265 req/s em 64 workers, caindo para 191 em
-  512, quando o p99 passou de 2 s.
+- **`hot`, 10 connections, 512 workers:** 192 req/s, with 5.5% `connection_refused`. This
+  was the first sign that the failure was connection-level and not latency.
+- **`spread`, 10 connections, 32 workers:** 1293 and 1216 req/s in two runs. These come from
+  an older version of the tool and must not be compared directly with sections 2 and 4.
+- **`read`, 10 connections:** about 6300 to 6900 req/s between 8 and 1024 workers, with
+  `connection_refused` above 512.
+- **`hot` with `-max 5000`, 30 s per stage:** 265 req/s at 64 workers, falling to 191 at
+  512, when p99 went past 2 s.
 
-## O que ainda falta
+## Still open
 
-- **Mais repetições dos blocos de 20 a 50 conexões**, para separar os valores dentro do
-  platô, que hoje não se distinguem pela dispersão (16 a 30% dentro de cada bloco).
-- **Confirmar o número real de conexões no banco durante uma rodada**, com
-  `pg_stat_activity`. Hoje o valor vem da declaração do operador, não de uma medição.
-- **Repetir o `pgbench`** nas mesmas condições da API, para ter uma referência válida.
-- **Repetir o cenário `read`** com o banco atual, já que ele cresceu bastante.
-- **Explicar as falhas de conexão** que apareceram no estágio de 512 workers nas medições
-  preliminares. A hipótese é a fila de `accept` do Windows, ainda não confirmada.
-- **Verificar o `503` do `AcquireTimeout` (3 s)**, que ainda não foi observado. Só dá para
-  provocar com mais workers do que a pool suporta, e o limite de recurso precisa estar
-  desligado para isso.
-- **Corrigir o rótulo em rodadas futuras**: passar `-api-max-conns` sempre igual ao valor
-  real da API, ou não passar nada quando não houver certeza.
+- **More repetitions of the 20 to 50 connection blocks**, to separate the values inside the
+  plateau, which the current spread cannot tell apart (16 to 30% within each block).
+- **Confirm the real connection count in the database during a run**, with
+  `pg_stat_activity`. Today the value comes from the operator's declaration, not from a
+  measurement.
+- **Repeat `pgbench`** under the same conditions as the API, to get a valid reference.
+- **Repeat the `read` scenario** with the current database, since it has grown a lot.
+- **Explain the connection failures** that appeared at 512 workers in the preliminary
+  measurements. The hypothesis is the Windows `accept` queue, not yet confirmed.
+- **Check the `503` from `AcquireTimeout` (3 s)**, which has not been observed yet. It only
+  shows up with more workers than the pool can serve, and the resource limit must be
+  disabled for that.
+- **Fix the label in future runs**: always pass `-api-max-conns` equal to the API's real
+  value, or pass nothing when there is no certainty.

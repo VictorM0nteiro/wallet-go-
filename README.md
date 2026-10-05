@@ -130,7 +130,7 @@ Integration tests spin up their own disposable PostgreSQL via testcontainers-go.
 - **No performance comparison yet.** Only the row-locking strategy (`SELECT ... FOR
   UPDATE`) exists. A second, `SERIALIZABLE`-with-retry strategy and a measured comparison
   between them are Sessions 7-9. A preliminary, unpolished load test already ran — see the
-  "pendências herdadas" note in Session 7 of the
+  "inherited follow-ups" note in Session 7 of the
   [execution plan](docs/plano-execucao-wallet-go.md) for what it found and what is still
   open before it counts as a real measurement.
 - **No induced-failure report yet** (Postgres dying mid-load, `SIGTERM` under load,
