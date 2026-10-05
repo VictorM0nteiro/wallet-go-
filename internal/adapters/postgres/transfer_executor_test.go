@@ -21,7 +21,7 @@ func newTestAccount(t *testing.T, repo *AccountRepository, owner string, kind do
 	return a.ID
 }
 
-func mustTransfer(t *testing.T, exec *LockingTransferExecutor, from, to uuid.UUID, cents int64) {
+func mustTransfer(t *testing.T, exec seeder, from, to uuid.UUID, cents int64) {
 	t.Helper()
 	req := app.TransferRequest{ID: uuid.New(), FromAccountID: from, ToAccountID: to, Amount: domain.NewMoney(cents)}
 	if err := exec.Execute(context.Background(), req); err != nil {
@@ -47,16 +47,16 @@ func countTable(t *testing.T, pool *Pool, table string) int {
 	return n
 }
 
-func TestLockingTransferExecutor_HappyPath(t *testing.T) {
+func suiteHappyPath(t *testing.T, mk func(*Pool) seeder) {
 	pool := newTestPool(t)
 	accounts, entries := NewAccountRepository(pool), NewEntryRepository(pool)
-	exec := NewLockingTransferExecutor(pool)
+	exec := mk(pool)
 
 	system := newTestAccount(t, accounts, "system", domain.AccountKindSystem)
 	ana := newTestAccount(t, accounts, "ana", domain.AccountKindCustomer)
 	bruno := newTestAccount(t, accounts, "bruno", domain.AccountKindCustomer)
 
-	mustTransfer(t, exec, system, ana, 10000) // deposito
+	mustTransfer(t, exec, system, ana, 10000)
 	mustTransfer(t, exec, ana, bruno, 3000)
 
 	if got := mustBalance(t, entries, ana); got != 7000 {
@@ -71,10 +71,10 @@ func TestLockingTransferExecutor_HappyPath(t *testing.T) {
 	assertInvariants(t, pool)
 }
 
-func TestLockingTransferExecutor_InsufficientFundsLeavesNothingBehind(t *testing.T) {
+func suiteInsufficientFundsLeavesNothingBehind(t *testing.T, mk func(*Pool) seeder) {
 	pool := newTestPool(t)
 	accounts, entries := NewAccountRepository(pool), NewEntryRepository(pool)
-	exec := NewLockingTransferExecutor(pool)
+	exec := mk(pool)
 
 	system := newTestAccount(t, accounts, "system", domain.AccountKindSystem)
 	ana := newTestAccount(t, accounts, "ana", domain.AccountKindCustomer)
@@ -84,8 +84,7 @@ func TestLockingTransferExecutor_InsufficientFundsLeavesNothingBehind(t *testing
 	transfersBefore, entriesBefore := countTable(t, pool, "transfers"), countTable(t, pool, "entries")
 
 	req := app.TransferRequest{ID: uuid.New(), FromAccountID: ana, ToAccountID: bruno, Amount: domain.NewMoney(1001)}
-	err := exec.Execute(context.Background(), req)
-	if !errors.Is(err, domain.ErrInsufficientFunds) {
+	if err := exec.Execute(context.Background(), req); !errors.Is(err, domain.ErrInsufficientFunds) {
 		t.Fatalf("err = %v, want ErrInsufficientFunds", err)
 	}
 
@@ -101,10 +100,10 @@ func TestLockingTransferExecutor_InsufficientFundsLeavesNothingBehind(t *testing
 	assertInvariants(t, pool)
 }
 
-func TestLockingTransferExecutor_UnknownAccount(t *testing.T) {
+func suiteUnknownAccount(t *testing.T, mk func(*Pool) seeder) {
 	pool := newTestPool(t)
 	accounts := NewAccountRepository(pool)
-	exec := NewLockingTransferExecutor(pool)
+	exec := mk(pool)
 
 	ana := newTestAccount(t, accounts, "ana", domain.AccountKindCustomer)
 
@@ -117,12 +116,12 @@ func TestLockingTransferExecutor_UnknownAccount(t *testing.T) {
 	}
 }
 
-// Opposite-direction transfers between the same two accounts are the
-// classic deadlock. Locking in ascending id order must make them safe.
-func TestLockingTransferExecutor_OppositeTransfersDoNotDeadlock(t *testing.T) {
+// Opposite-direction transfers between the same two accounts are the classic
+// deadlock. Both strategies must finish them with no error and no lost money.
+func suiteOppositeTransfersDoNotDeadlock(t *testing.T, mk func(*Pool) seeder) {
 	pool := newTestPool(t)
 	accounts, entries := NewAccountRepository(pool), NewEntryRepository(pool)
-	exec := NewLockingTransferExecutor(pool)
+	exec := mk(pool)
 
 	system := newTestAccount(t, accounts, "system", domain.AccountKindSystem)
 	a := newTestAccount(t, accounts, "a", domain.AccountKindCustomer)
@@ -155,4 +154,20 @@ func TestLockingTransferExecutor_OppositeTransfersDoNotDeadlock(t *testing.T) {
 		t.Errorf("a+b = %d, want 200000", got)
 	}
 	assertInvariants(t, pool)
+}
+
+func TestTransferExecutor_HappyPath(t *testing.T) {
+	forEachStrategy(t, suiteHappyPath)
+}
+
+func TestTransferExecutor_InsufficientFundsLeavesNothingBehind(t *testing.T) {
+	forEachStrategy(t, suiteInsufficientFundsLeavesNothingBehind)
+}
+
+func TestTransferExecutor_UnknownAccount(t *testing.T) {
+	forEachStrategy(t, suiteUnknownAccount)
+}
+
+func TestTransferExecutor_OppositeTransfersDoNotDeadlock(t *testing.T) {
+	forEachStrategy(t, suiteOppositeTransfersDoNotDeadlock)
 }

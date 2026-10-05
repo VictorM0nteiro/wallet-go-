@@ -25,6 +25,7 @@ cp .env.example .env
 | `DATABASE_URL`   | yes      |         | PostgreSQL connection string                  |
 | `WALLET_API_KEY` | yes      |         | Static API key expected in the `X-API-Key` header |
 | `LISTEN_ADDR`    | no       | `:8080` | Address the HTTP server listens on            |
+| `WALLET_TRANSFER_STRATEGY` | no | `locking` | Concurrency strategy for transfers: `locking` or `serializable`. See [concurrency-strategies.md](concurrency-strategies.md). |
 
 The `.env` file is git-ignored. Always run the app from the repository root,
 because that is where `.env` is looked up.

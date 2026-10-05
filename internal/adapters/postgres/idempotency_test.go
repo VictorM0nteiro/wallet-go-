@@ -15,12 +15,12 @@ import (
 )
 
 // idemFixture creates a system account and two customers, funds ana with
-// 10000 cents, and returns a service wired to the locking strategy.
-func idemFixture(t *testing.T) (*Pool, *app.TransferService, uuid.UUID, uuid.UUID) {
+// 10000 cents, and returns a service wired to the strategy under test.
+func idemFixture(t *testing.T, mk func(*Pool) seeder) (*Pool, *app.TransferService, uuid.UUID, uuid.UUID) {
 	t.Helper()
 	pool := newTestPool(t)
 	accounts := NewAccountRepository(pool)
-	exec := NewLockingTransferExecutor(pool)
+	exec := mk(pool)
 
 	system := newTestAccount(t, accounts, "system", domain.AccountKindSystem)
 	ana := newTestAccount(t, accounts, "ana", domain.AccountKindCustomer)
@@ -46,8 +46,8 @@ func cmdFor(t *testing.T, scope, key string, from, to uuid.UUID, cents int64) ap
 	}
 }
 
-func TestTransferService_ConcurrentSameKeyTransfersExactlyOnce(t *testing.T) {
-	pool, svc, ana, bruno := idemFixture(t)
+func suiteConcurrentSameKeyTransfersExactlyOnce(t *testing.T, mk func(*Pool) seeder) {
+	pool, svc, ana, bruno := idemFixture(t, mk)
 	transfersBefore, entriesBefore := countTable(t, pool, "transfers"), countTable(t, pool, "entries")
 	cmd := cmdFor(t, "api-key-1", "k-1", ana, bruno, 3000)
 
@@ -94,8 +94,8 @@ func TestTransferService_ConcurrentSameKeyTransfersExactlyOnce(t *testing.T) {
 	assertInvariants(t, pool)
 }
 
-func TestTransferService_ReplayReturnsOriginalStatusAndBody(t *testing.T) {
-	_, svc, ana, bruno := idemFixture(t)
+func suiteReplayReturnsOriginalStatusAndBody(t *testing.T, mk func(*Pool) seeder) {
+	_, svc, ana, bruno := idemFixture(t, mk)
 	cmd := cmdFor(t, "api-key-1", "k-1", ana, bruno, 3000)
 
 	first, err := svc.Transfer(context.Background(), cmd)
@@ -125,8 +125,8 @@ func TestTransferService_ReplayReturnsOriginalStatusAndBody(t *testing.T) {
 	}
 }
 
-func TestTransferService_SameKeyDifferentBodyIsRejected(t *testing.T) {
-	pool, svc, ana, bruno := idemFixture(t)
+func suiteSameKeyDifferentBodyIsRejected(t *testing.T, mk func(*Pool) seeder) {
+	pool, svc, ana, bruno := idemFixture(t, mk)
 
 	if _, err := svc.Transfer(context.Background(), cmdFor(t, "api-key-1", "k-1", ana, bruno, 3000)); err != nil {
 		t.Fatalf("first: %v", err)
@@ -143,10 +143,10 @@ func TestTransferService_SameKeyDifferentBodyIsRejected(t *testing.T) {
 }
 
 // The in_flight state is never visible to other transactions when the claim
-// and the transfer share one transaction (a concurrent claim blocks instead).
-// This seeds the row directly to cover the 409 branch of the use case.
-func TestTransferService_InFlightKeyIsRejected(t *testing.T) {
-	pool, svc, ana, bruno := idemFixture(t)
+// and the transfer share one transaction. This seeds the row directly to cover
+// the 409 branch of the use case.
+func suiteInFlightKeyIsRejected(t *testing.T, mk func(*Pool) seeder) {
+	pool, svc, ana, bruno := idemFixture(t, mk)
 	cmd := cmdFor(t, "api-key-1", "k-1", ana, bruno, 3000)
 
 	const seed = `
@@ -167,8 +167,8 @@ func TestTransferService_InFlightKeyIsRejected(t *testing.T) {
 	}
 }
 
-func TestTransferService_SameKeyInDifferentScopesDoesNotCollide(t *testing.T) {
-	pool, svc, ana, bruno := idemFixture(t)
+func suiteSameKeyInDifferentScopesDoesNotCollide(t *testing.T, mk func(*Pool) seeder) {
+	pool, svc, ana, bruno := idemFixture(t, mk)
 	transfersBefore := countTable(t, pool, "transfers")
 
 	for _, scope := range []string{"api-key-1", "api-key-2"} {
@@ -184,4 +184,24 @@ func TestTransferService_SameKeyInDifferentScopesDoesNotCollide(t *testing.T) {
 		t.Errorf("transfers created = %d, want 2", got)
 	}
 	assertInvariants(t, pool)
+}
+
+func TestIdempotency_ConcurrentSameKeyTransfersExactlyOnce(t *testing.T) {
+	forEachStrategy(t, suiteConcurrentSameKeyTransfersExactlyOnce)
+}
+
+func TestIdempotency_ReplayReturnsOriginalStatusAndBody(t *testing.T) {
+	forEachStrategy(t, suiteReplayReturnsOriginalStatusAndBody)
+}
+
+func TestIdempotency_SameKeyDifferentBodyIsRejected(t *testing.T) {
+	forEachStrategy(t, suiteSameKeyDifferentBodyIsRejected)
+}
+
+func TestIdempotency_InFlightKeyIsRejected(t *testing.T) {
+	forEachStrategy(t, suiteInFlightKeyIsRejected)
+}
+
+func TestIdempotency_SameKeyInDifferentScopesDoesNotCollide(t *testing.T) {
+	forEachStrategy(t, suiteSameKeyInDifferentScopesDoesNotCollide)
 }

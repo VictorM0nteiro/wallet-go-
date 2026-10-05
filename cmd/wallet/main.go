@@ -21,9 +21,10 @@ import (
 )
 
 type config struct {
-	dsn    string
-	apiKey string
-	addr   string
+	dsn      string
+	apiKey   string
+	addr     string
+	strategy string
 }
 
 func loadConfig() (config, error) {
@@ -42,8 +43,16 @@ func loadConfig() (config, error) {
 	if !strings.Contains(addr, ":") {
 		return config{}, fmt.Errorf("LISTEN_ADDR must be host:port or :port, got %q", addr)
 	}
+	strategy := os.Getenv("WALLET_TRANSFER_STRATEGY")
+	if strategy == "" {
+		strategy = "locking"
+	}
+	if strategy != "locking" && strategy != "serializable" {
+		return config{}, fmt.Errorf("WALLET_TRANSFER_STRATEGY must be locking or serializable, got %q", strategy)
+	}
 
-	return config{dsn: dsn, apiKey: apiKey, addr: addr}, nil
+	return config{dsn: dsn, apiKey: apiKey, addr: addr, strategy: strategy}, nil
+
 }
 
 func main() {
@@ -89,7 +98,11 @@ func run() error {
 		return err
 	}
 
-	transfers := app.NewTransferService(postgres.NewLockingTransferExecutor(pool))
+	executor, err := postgres.NewTransferExecutor(cfg.strategy, pool)
+	if err != nil {
+		return err
+	}
+	transfers := app.NewTransferService(executor)
 	srv := &http.Server{
 		Addr: cfg.addr,
 		Handler: httpapi.NewRouter(httpapi.Deps{
@@ -118,6 +131,9 @@ func run() error {
 	}
 
 	logger.Info("wallet: shutting down")
+	if r, ok := executor.(interface{ Retries() uint64 }); ok {
+		logger.Info("wallet: serialization retries", "count", r.Retries())
+	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
