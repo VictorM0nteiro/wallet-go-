@@ -17,7 +17,6 @@ services:
 
   migrate:
     image: migrate/migrate:v4.18.1
-    profiles: ["tools"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -25,13 +24,18 @@ services:
       - ./migrations:/migrations
     command:
       ["-path", "/migrations", "-database", "postgres://wallet:wallet@postgres:5432/wallet?sslmode=disable", "up"]
+    restart: "no"
 
   app:
     build: .
+    restart: on-failure
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
+      WALLET_TRANSFER_STRATEGY: ${WALLET_TRANSFER_STRATEGY:-locking}
       DATABASE_URL: postgres://wallet:wallet@postgres:5432/wallet?sslmode=disable
       WALLET_API_KEY: dev-key
       LISTEN_ADDR: :8080

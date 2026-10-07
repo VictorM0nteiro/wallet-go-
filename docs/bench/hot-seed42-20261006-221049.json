@@ -1,0 +1,79 @@
+{
+  "timestamp": "2026-10-06T22:10:49.7595967-03:00",
+  "scenario": "hot",
+  "seed": 42,
+  "environment": {
+    "os": "windows",
+    "arch": "amd64",
+    "num_cpu": 12,
+    "go_version": "go1.26.0",
+    "postgres_version": "PostgreSQL 16.15 (Debian 16.15-1.pgdg13+2) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "db_size_bytes": 301530135
+  },
+  "baseline": {
+    "cpu_percent": 20.572916666666664,
+    "ram_percent": 54
+  },
+  "params": {
+    "api_max_conns_declared": 30,
+    "base": "http://localhost:8080",
+    "stage_duration": "15s",
+    "ramp_up": "1s",
+    "start_workers": 8,
+    "max_workers": 128,
+    "accounts": 2,
+    "rate": 0,
+    "err_limit": 0.05,
+    "p99_limit": "2s",
+    "cpu_limit": 100,
+    "ram_limit": 90
+  },
+  "stages": [
+    {
+      "workers": 8,
+      "duration_ms": 15153,
+      "requests": 3884,
+      "rps": 256.308006307843,
+      "p50_ms": 4.0659,
+      "p95_ms": 212.3009,
+      "p99_ms": 520.7045,
+      "max_ms": 734.2128,
+      "statuses": {
+        "201": 3795,
+        "500": 89
+      },
+      "transport_errors": {},
+      "app_failure_ratio": 0.022914521112255407,
+      "conn_failure_ratio": 0,
+      "broke": false
+    },
+    {
+      "workers": 16,
+      "duration_ms": 15187,
+      "requests": 3789,
+      "rps": 249.47819617190228,
+      "p50_ms": 4.7761,
+      "p95_ms": 433.2106,
+      "p99_ms": 597.6714,
+      "max_ms": 781.5211,
+      "statuses": {
+        "201": 3594,
+        "500": 195
+      },
+      "transport_errors": {},
+      "app_failure_ratio": 0.05146476642913698,
+      "conn_failure_ratio": 0,
+      "broke": true,
+      "broke_reason": "application failure ratio 5.1% (non-2xx responses) is above 5.0%"
+    }
+  ],
+  "stop_kind": "api_broke",
+  "stop_reason": "application failure ratio 5.1% (non-2xx responses) is above 5.0%",
+  "recovered_in": "2ms",
+  "consistency": {
+    "passed": true,
+    "actual_cents": 2000000000,
+    "expected_cents": 2000000000,
+    "diff_cents": 0
+  }
+}

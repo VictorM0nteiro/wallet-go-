@@ -483,6 +483,35 @@ não numa branch de estudo.
 **Pronto quando:** `go run ./cmd/wallet` e `docker compose up` sobem a aplicação via Fx,
 o ciclo de `curl` da Sessão 5 passa sem alteração, e `go test -race ./...` continua verde.
 
+## X8 — Menor privilégio no código e na infraestrutura
+
+Cada parte do sistema recebe só o acesso que precisa. A invariante de ledger append-only
+deixa de depender só da disciplina no código e passa a ser imposta pelo banco.
+
+- **Papéis de banco separados.** Um papel de migração (`wallet_migrator`, dono do schema)
+  e um papel de aplicação (`wallet_app`). O app recebe `SELECT` e `INSERT` em `entries`,
+  `transfers`, `accounts` e `idempotency_keys`, e nada de `UPDATE` ou `DELETE` em
+  `entries`. Em `idempotency_keys`, `UPDATE` só nas colunas de estado e resposta.
+- **Teste de permissão.** Um teste conecta como `wallet_app` e confirma que `UPDATE` e
+  `DELETE` em `entries` falham com `permission denied`. Esse teste protege a tese do
+  projeto, não só o código atual.
+- **Chaves de API com escopo.** A chave estática da Sessão 5 passa a ter escopo (leitura
+  ou escrita). Uma chave só de leitura não consegue depositar, sacar nem transferir,
+  e a recusa responde `403`, não `401`. A forma final fica a cargo de quem for decidir a
+  autenticação real, mas o modelo de escopo entra já.
+- **Contêiner com privilégio mínimo.** No `docker-compose.yml`: `read_only: true`,
+  `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, usuário não-root (já feito
+  na imagem distroless). Segredos vêm de variáveis de ambiente e nunca entram na imagem.
+- **Dependências e exposição mínimas.** Conferir que o binário não carrega ferramentas
+  de migração e que a porta do Postgres não é publicada para fora do host, a não ser
+  quando o `loadtest` precisar dela.
+
+Pode ser feito a qualquer momento depois da Fase E. É mais barato fazer antes da migração
+`000002` (X1), para que ela já nasça com as permissões certas.
+
+**Pronto quando:** o teste de permissão passa como `wallet_app`, uma chave de leitura é
+recusada em escrita, e `docker compose up` sobe o app com as restrições acima sem erro.
+
 ---
 
 ## 4. Riscos e contingência

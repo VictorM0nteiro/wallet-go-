@@ -143,6 +143,72 @@ the terminal output.
 - **`hot` with `-max 5000`, 30 s per stage:** 265 req/s at 64 workers, falling to 191 at
   512, when p99 went past 2 s.
 
+## 6. Locking vs serializable (same load, alternating blocks)
+
+Scenarios `hot` and `spread`, seed 42, 8 to 128 workers doubling, 15 s stages, `-api-max-conns 30`.
+Each strategy ran 5 times per scenario, alternating `locking` and `serializable` in the same
+order (hot first, then spread). The `.env` was changed between blocks and checked with
+`docker inspect` before each run. Each run restarted the app afterwards, so the retry counter
+in the shutdown log belongs to that run only. Container rebuilds were not needed, since only
+the environment variable changed.
+
+Command for each run (PowerShell, one line):
+
+```powershell
+go run ./cmd/loadtest -scenario hot -max 128 -stage 15s -seed 42 -accounts 100 -api-max-conns 30
+```
+
+The run used the scenario and strategy from the `.env` at the time. The `-strategy` flag is
+not implemented yet, so the strategy is recorded only by the `.env` state and by the
+run index, not in the JSON.
+
+**Peak throughput (highest stage rps per run, 5 runs each):**
+
+| Scenario | Strategy | Median | Range | Last stage reached | Stop reason |
+|---|---|---|---|---|---|
+| hot | locking | 350 req/s | 308 to 466 | 128 workers in all 5 runs | none (max workers) |
+| hot | serializable | 341 req/s | 256 to 368 | 16 workers (2 runs), 32 workers (3 runs) | `api_broke` |
+| spread | locking | 2548 req/s | 2314 to 2848 | 128 workers in all 5 runs | none (max workers) |
+| spread | serializable | 741 req/s | 722 to 839 | 64 workers in all 5 runs | `api_broke` |
+
+**What the runs show, without interpretation:**
+
+- **Locking never returned a non-2xx status.** The 10 locking runs had 0 non-201 responses,
+  and all 10 passed the ledger check.
+- **Serializable returned `500` under contention.** The non-201 responses were all `500`,
+  with no `503` and no `409`. They were 5.6% of requests on `hot` (824 of 14611 in run 1)
+  and about 2.3% on `spread` (971 of 41399 in run 1). These are the requests that exhausted
+  the retry limit, as the code is written. The ledger check still passed in every run, so
+  the failed transfers were not applied. The mapping of this error to `500` has not been
+  confirmed in code yet.
+- **Serializable broke the API on `spread` at 64 workers in all five runs**, with 500s as the
+  cause. At 8 workers it already returned some `500` (9 of 10202 in run 1), before the break.
+- **Retries per request** (retries counted by the app, divided by the requests of the run):
+  1.05 to 1.73 on `hot`, 1.49 to 1.63 on `spread`.
+- **Requests completed in the same time.** Over a full `spread` run, locking completed about
+  154 000 to 173 000 requests, and serializable about 40 000 to 46 000, with the same stage
+  durations.
+- **Pool size during the run.** A `pg_stat_activity` sample at about 45 s showed 31 sessions
+  in the locking runs (30 pool connections plus the sampler's `psql` session), which matches
+  `MaxConns` 30. The serializable samples showed fewer sessions, but they were taken while
+  the API was already breaking.
+- **Comparison with the earlier pool curve (section 2).** The median for `spread` with 30
+  connections was 3667 req/s there, and 2548 req/s here. The gap shows that the host varies
+  between sessions. These numbers should only be compared inside this matrix.
+
+**Decisions left to the author** (the analysis of why each strategy behaves this way is for the
+author to write, as the project's working rules say):
+
+- Whether the `500` under retry exhaustion is acceptable, or whether it should be a retryable
+  status such as `503` or `409` (see the open item on `maxAttempts` below).
+- Whether to raise `maxAttempts` (currently 10) and measure again.
+- Whether the strategy should be recorded in the JSON (the `-strategy` flag), so that a future
+  run does not depend on the `.env` state.
+
+Matrix reports: `docs/bench/hot-seed42-20261006-2204*` to `…2225*` and
+`docs/bench/spread-seed42-20261006-2206*` to `…2227*`, one JSON per run, listed by timestamp.
+The index with retries and the database sample is kept outside the repository.
+
 ## Still open
 
 - **More repetitions of the 20 to 50 connection blocks**, to separate the values inside the
