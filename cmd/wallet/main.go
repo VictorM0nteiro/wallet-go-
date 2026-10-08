@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -25,6 +26,7 @@ type config struct {
 	apiKey   string
 	addr     string
 	strategy string
+	maxConns int32
 }
 
 func loadConfig() (config, error) {
@@ -51,7 +53,16 @@ func loadConfig() (config, error) {
 		return config{}, fmt.Errorf("WALLET_TRANSFER_STRATEGY must be locking or serializable, got %q", strategy)
 	}
 
-	return config{dsn: dsn, apiKey: apiKey, addr: addr, strategy: strategy}, nil
+	maxConns := int32(30)
+	if v := os.Getenv("WALLET_DB_MAX_CONNS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return config{}, fmt.Errorf("WALLET_DB_MAX_CONNS must be a positive integer, got %q", v)
+		}
+		maxConns = int32(n)
+	}
+
+	return config{dsn: dsn, apiKey: apiKey, addr: addr, strategy: strategy, maxConns: maxConns}, nil
 
 }
 
@@ -79,7 +90,7 @@ func run() error {
 
 	pool, err := postgres.NewPool(ctx, postgres.PoolConfig{
 		DSN:             cfg.dsn,
-		MaxConns:        30,
+		MaxConns:        cfg.maxConns,
 		MaxConnLifetime: 30 * time.Minute,
 		AcquireTimeout:  3 * time.Second,
 	})
@@ -122,7 +133,7 @@ func run() error {
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
-	logger.Info("wallet: listening", "addr", cfg.addr)
+	logger.Info("wallet: listening", "addr", cfg.addr, "transfer_strategy", cfg.strategy, "db_max_conns", cfg.maxConns)
 
 	select {
 	case err := <-errCh:

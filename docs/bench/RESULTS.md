@@ -7,6 +7,11 @@ numbers below.
 The results are **relative comparisons between configurations on the same machine**.
 They are not production capacity.
 
+The JSON reports behind sections 2, 3 and 6 were pruned from this folder on 2026-10-07,
+once the Postgres config changed and those numbers stopped being the current baseline
+(see "Postgres configuration" below). They are not lost: every file is in git history up
+to commit `2b1c222`, retrievable with `git show 2b1c222:docs/bench/<filename>`.
+
 ## Environment
 
 | Item | Value |
@@ -17,6 +22,20 @@ They are not production capacity.
 | PostgreSQL | 16.15, `postgres:16` container |
 | Go | 1.26.0 (local toolchain) |
 | API and generator | same machine, no CPU isolation |
+
+## Postgres configuration
+
+Up to and including section 6, every run used the stock `postgres:16` image config
+(`shared_buffers` 128MB, `effective_cache_size` 4GB, `max_wal_size` 1GB,
+`random_page_cost` 4 — all defaults, nothing set by this project).
+
+Starting 2026-10-07, `docker-compose.yml` sets `shared_buffers=1GB`,
+`effective_cache_size=10GB`, `max_wal_size=4GB`, `random_page_cost=1.1` on the
+`postgres` service, sized for this host (12 threads, ~15 GiB, nothing else
+competing for the container). `fsync` and `synchronous_commit` were left `on`:
+these four changes give Postgres more of the headroom the host already had, they
+do not change any durability guarantee. Any run after this line is **not**
+comparable to sections 2 and 6 without saying so.
 
 ## General caveats
 
@@ -179,8 +198,9 @@ run index, not in the JSON.
   with no `503` and no `409`. They were 5.6% of requests on `hot` (824 of 14611 in run 1)
   and about 2.3% on `spread` (971 of 41399 in run 1). These are the requests that exhausted
   the retry limit, as the code is written. The ledger check still passed in every run, so
-  the failed transfers were not applied. The mapping of this error to `500` has not been
-  confirmed in code yet.
+  the failed transfers were not applied. The code path is confirmed: after `maxAttempts`
+  the executor wraps the `40001` error, and `statusFor` has no case for it, so it falls to
+  the default `500 internal_error`.
 - **Serializable broke the API on `spread` at 64 workers in all five runs**, with 500s as the
   cause. At 8 workers it already returned some `500` (9 of 10202 in run 1), before the break.
 - **Retries per request** (retries counted by the app, divided by the requests of the run):
@@ -209,13 +229,75 @@ Matrix reports: `docs/bench/hot-seed42-20261006-2204*` to `…2225*` and
 `docs/bench/spread-seed42-20261006-2206*` to `…2227*`, one JSON per run, listed by timestamp.
 The index with retries and the database sample is kept outside the repository.
 
+## 7. Re-measurement under the tuned Postgres config
+
+Same two experiments as sections 2 and 6 (pool curve and locking vs serializable),
+repeated after the `shared_buffers`/`effective_cache_size`/`max_wal_size`/
+`random_page_cost` change above. `WALLET_DB_MAX_CONNS` (new, see below) made this
+run without any container rebuild between blocks.
+
+**Pool curve** (`spread`, fixed 32 workers, `locking`, seed 42, 15 s, 5 runs per size):
+
+| Connections | Median req/s (tuned) | Median req/s (stock, section 2) |
+|---|---|---|
+| 10 | 2377 | ~2500 |
+| 20 | 3016 | 3312 |
+| 30 | 3427 | 3667 |
+| 40 | 2972 | 3321 |
+| 50 | 3232 | 3324 |
+
+Every tuned-run value is below the corresponding stock-run value, by 5% to 10%. The
+*shape* of the curve repeats (rises from 10 to 30, plateaus or dips from 30 to 50), but
+the tuning did not raise throughput here — if anything this session's host was slightly
+noisier. This matches the caveat already in this document: numbers drift between
+sessions more than the difference any one setting makes. No run failed and no run lost
+ledger consistency.
+
+**Locking vs serializable** (same command as section 6, seed 42, 5 runs per scenario):
+
+| Scenario | Strategy | Median req/s (tuned) | Median req/s (stock, section 6) |
+|---|---|---|---|
+| hot | locking | 318 | 350 |
+| hot | serializable | 271 | 341 |
+| spread | locking | 2705 | 2548 |
+| spread | serializable | 682 | 741 |
+
+Only `spread`/`locking` moved in the direction tuning would predict (+6%), and it is the
+one scenario with little lock contention, where more `shared_buffers` and a wider
+`max_wal_size` have the most room to help. Every other number went down slightly,
+inside the same run-to-run noise seen in section 2. The retry counts stayed in the same
+range as before tuning: `hot`/`serializable` 10 200 to 21 677, `spread`/`serializable`
+66 400 to 69 600. Retries come from concurrent transactions overlapping, not from disk
+I/O, so a storage-side tuning change was not expected to move that number, and it did
+not. All 20 runs kept `500` as the only non-2xx status, and ledger consistency passed in
+every run.
+
+**Reading.** On this host, for this workload, the four tuning changes did not produce a
+measurable improvement outside of normal session noise. The `hot` plateau and the
+`serializable` retry volume are set by contention at the row/transaction level, not by
+how much of the host's RAM Postgres was allowed to use. This does not rule out the
+`fsync`/`synchronous_commit` hypothesis from the same discussion — that one was never
+tested, since it trades away a durability guarantee and was treated as a separate,
+disposable experiment, not a committed config change.
+
+**New since section 6:** `WALLET_DB_MAX_CONNS` (env var, default 30) replaced the
+hardcoded pool size in `cmd/wallet/main.go`, and the app now logs `transfer_strategy`
+and `db_max_conns` at startup. Changing either no longer needs an image rebuild, only
+`docker compose up -d app` — the exact mistake that produced the mislabeled blocks B and
+D in section 2 is no longer possible this way.
+
 ## Still open
 
 - **More repetitions of the 20 to 50 connection blocks**, to separate the values inside the
   plateau, which the current spread cannot tell apart (16 to 30% within each block).
-- **Confirm the real connection count in the database during a run**, with
-  `pg_stat_activity`. Today the value comes from the operator's declaration, not from a
-  measurement.
+- ~~Confirm the real connection count during a run with `pg_stat_activity`.~~ Done in
+  sections 6 and 7: a sample was taken mid-run in every one of the 45 matrix runs. The
+  locking samples land close to the declared pool size (for example 30 or 31 sessions at
+  `-api-max-conns 30`, the extra one being the sampler's own connection).
+- **Test the `synchronous_commit = off` hypothesis for the `hot` plateau** (see the
+  concurrency discussion before section 7). Not run yet: it trades away a durability
+  guarantee, so it should stay a disposable, undocumented-as-config experiment, not
+  something committed to `docker-compose.yml`.
 - **Repeat `pgbench`** under the same conditions as the API, to get a valid reference.
 - **Repeat the `read` scenario** with the current database, since it has grown a lot.
 - **Explain the connection failures** that appeared at 512 workers in the preliminary

@@ -1,6 +1,22 @@
 services:
   postgres:
     image: postgres:16
+    # Tuned for this host (12 threads, ~15 GiB), not for a production server:
+    # shared_buffers and effective_cache_size use headroom the stock 128MB/4GB
+    # defaults left idle; max_wal_size spaces out checkpoints during load-test
+    # bursts; random_page_cost assumes SSD instead of the default spinning-disk
+    # value. Durability settings (fsync, synchronous_commit) are untouched.
+    # See docs/bench/RESULTS.md for the measurements taken under this config.
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=2GB"
+      - "-c"
+      - "effective_cache_size=10GB"
+      - "-c"
+      - "max_wal_size=4GB"
+      - "-c"
+      - "random_page_cost=1.1"
     environment:
       POSTGRES_USER: wallet
       POSTGRES_PASSWORD: wallet
@@ -9,6 +25,7 @@ services:
       - "5432:5432"
     volumes:
       - wallet_pgdata:/var/lib/postgresql/data
+      - ./deploy/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U wallet -d wallet"]
       interval: 5s
@@ -36,6 +53,7 @@ services:
         condition: service_completed_successfully
     environment:
       WALLET_TRANSFER_STRATEGY: ${WALLET_TRANSFER_STRATEGY:-locking}
+      WALLET_DB_MAX_CONNS: ${WALLET_DB_MAX_CONNS:-30}
       DATABASE_URL: postgres://wallet:wallet@postgres:5432/wallet?sslmode=disable
       WALLET_API_KEY: dev-key
       LISTEN_ADDR: :8080

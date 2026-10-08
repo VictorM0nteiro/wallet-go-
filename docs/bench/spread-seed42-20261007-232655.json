@@ -1,0 +1,126 @@
+{
+  "timestamp": "2026-10-07T23:26:55.6260754-03:00",
+  "scenario": "spread",
+  "seed": 42,
+  "environment": {
+    "os": "windows",
+    "arch": "amd64",
+    "num_cpu": 12,
+    "go_version": "go1.26.0",
+    "postgres_version": "PostgreSQL 16.15 (Debian 16.15-1.pgdg13+2) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "db_size_bytes": 3260709911
+  },
+  "baseline": {
+    "cpu_percent": 2.864583333333333,
+    "ram_percent": 69
+  },
+  "params": {
+    "api_max_conns_declared": 30,
+    "base": "http://localhost:8080",
+    "stage_duration": "15s",
+    "ramp_up": "1s",
+    "start_workers": 8,
+    "max_workers": 128,
+    "accounts": 100,
+    "rate": 0,
+    "err_limit": 0.05,
+    "p99_limit": "2s",
+    "cpu_limit": 100,
+    "ram_limit": 90
+  },
+  "stages": [
+    {
+      "workers": 8,
+      "duration_ms": 15003,
+      "requests": 28251,
+      "rps": 1882.9971390387598,
+      "p50_ms": 3.9986,
+      "p95_ms": 6.0021,
+      "p99_ms": 8.1188,
+      "max_ms": 16.4316,
+      "statuses": {
+        "201": 28251
+      },
+      "transport_errors": {},
+      "app_failure_ratio": 0,
+      "conn_failure_ratio": 0,
+      "broke": false
+    },
+    {
+      "workers": 16,
+      "duration_ms": 15006,
+      "requests": 43074,
+      "rps": 2870.4323846507878,
+      "p50_ms": 4.9986,
+      "p95_ms": 9.0001,
+      "p99_ms": 12.0001,
+      "max_ms": 22.7625,
+      "statuses": {
+        "201": 43074
+      },
+      "transport_errors": {},
+      "app_failure_ratio": 0,
+      "conn_failure_ratio": 0,
+      "broke": false
+    },
+    {
+      "workers": 32,
+      "duration_ms": 15015,
+      "requests": 35853,
+      "rps": 2387.710350335774,
+      "p50_ms": 10.6184,
+      "p95_ms": 27.2806,
+      "p99_ms": 40.4309,
+      "max_ms": 143.5616,
+      "statuses": {
+        "201": 35853
+      },
+      "transport_errors": {},
+      "app_failure_ratio": 0,
+      "conn_failure_ratio": 0,
+      "broke": false
+    },
+    {
+      "workers": 64,
+      "duration_ms": 15034,
+      "requests": 36216,
+      "rps": 2408.902947710736,
+      "p50_ms": 23.9573,
+      "p95_ms": 40.5787,
+      "p99_ms": 53.1786,
+      "max_ms": 91.0716,
+      "statuses": {
+        "201": 36216
+      },
+      "transport_errors": {},
+      "app_failure_ratio": 0,
+      "conn_failure_ratio": 0,
+      "broke": false
+    },
+    {
+      "workers": 128,
+      "duration_ms": 15058,
+      "requests": 33649,
+      "rps": 2234.5679702662537,
+      "p50_ms": 54.5085,
+      "p95_ms": 73.6383,
+      "p99_ms": 86.4483,
+      "max_ms": 136.1941,
+      "statuses": {
+        "201": 33649
+      },
+      "transport_errors": {},
+      "app_failure_ratio": 0,
+      "conn_failure_ratio": 0,
+      "broke": false
+    }
+  ],
+  "stop_kind": "max_workers",
+  "recovered_in": "4ms",
+  "consistency": {
+    "passed": true,
+    "actual_cents": 100000000000,
+    "expected_cents": 100000000000,
+    "diff_cents": 0
+  }
+}
