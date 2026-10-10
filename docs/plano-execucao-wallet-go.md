@@ -398,7 +398,8 @@ outbox, chave de negócio, e por último o exercício de Fx.
 ## X1 — Reversão (`ROLLBACK`/`REFUND`) sem estorno duplicado
 
 - Um transfer de estorno aponta para o `transfer_id` original. Migration nova
-  (`000002`), com `reverses_transfer_id UUID UNIQUE REFERENCES transfers(id)`, para
+  (`000003`; `000002` já foi usada pelo X8), com `reverses_transfer_id UUID UNIQUE
+  REFERENCES transfers(id)`, para
   impedir dois estornos bem-sucedidos da mesma operação no banco, não só na aplicação.
 - Estorno que exigiria mais saldo do que o disponível vira rejeição com código próprio,
   diferente de `insufficient_funds`, e fica auditável.
@@ -488,29 +489,38 @@ o ciclo de `curl` da Sessão 5 passa sem alteração, e `go test -race ./...` co
 Cada parte do sistema recebe só o acesso que precisa. A invariante de ledger append-only
 deixa de depender só da disciplina no código e passa a ser imposta pelo banco.
 
-- **Papéis de banco separados.** Um papel de migração (`wallet_migrator`, dono do schema)
-  e um papel de aplicação (`wallet_app`). O app recebe `SELECT` e `INSERT` em `entries`,
-  `transfers`, `accounts` e `idempotency_keys`, e nada de `UPDATE` ou `DELETE` em
-  `entries`. Em `idempotency_keys`, `UPDATE` só nas colunas de estado e resposta.
-- **Teste de permissão.** Um teste conecta como `wallet_app` e confirma que `UPDATE` e
-  `DELETE` em `entries` falham com `permission denied`. Esse teste protege a tese do
-  projeto, não só o código atual.
-- **Chaves de API com escopo.** A chave estática da Sessão 5 passa a ter escopo (leitura
-  ou escrita). Uma chave só de leitura não consegue depositar, sacar nem transferir,
-  e a recusa responde `403`, não `401`. A forma final fica a cargo de quem for decidir a
-  autenticação real, mas o modelo de escopo entra já.
-- **Contêiner com privilégio mínimo.** No `docker-compose.yml`: `read_only: true`,
-  `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, usuário não-root (já feito
-  na imagem distroless). Segredos vêm de variáveis de ambiente e nunca entram na imagem.
-- **Dependências e exposição mínimas.** Conferir que o binário não carrega ferramentas
-  de migração e que a porta do Postgres não é publicada para fora do host, a não ser
-  quando o `loadtest` precisar dela.
+- **Papéis de banco separados.** ✅ `wallet_app` recebe `SELECT` e `INSERT` em `entries`,
+  `transfers`, `accounts` e `idempotency_keys`, `UPDATE (currency)` em `accounts` (só para
+  o `FOR UPDATE` do locking funcionar) e `UPDATE` em `idempotency_keys` restrito às
+  colunas de estado e resposta — nada de `UPDATE`/`DELETE` em `entries`. Migração
+  `000002`. O `app` conecta como `wallet_app` no `docker-compose.yml`; `migrate` continua
+  como `wallet`. **Ressalva:** `wallet` não é um papel de migração de verdade, é o
+  usuário bootstrap do `POSTGRES_USER`, que a imagem oficial do Postgres sempre cria como
+  superusuário. Um `wallet_migrator` sem superuser exigiria reatribuir a posse do schema
+  depois da criação, o que não foi feito — a separação real é só entre `wallet_app` e
+  "todo o resto", não três papéis distintos.
+- **Teste de permissão.** ✅ `TestWalletAppLeastPrivilege` conecta como `wallet_app` (não
+  como o dono do schema que o resto da suíte usa) e confirma `UPDATE`/`DELETE` em
+  `entries` com `42501 insufficient_privilege`, mais que `SELECT`, `INSERT` e
+  `SELECT ... FOR UPDATE` em `accounts` continuam funcionando. Rodar esse teste exigiu
+  corrigir `newTestPool`: a migração 000002 quebrava a suíte inteira porque o container de
+  teste nunca tinha o role `wallet_app` — bug real, não hipotético, encontrado ao fechar
+  este item.
+- **Chaves de API com escopo.** Pendente. A chave estática da Sessão 5 passa a ter escopo
+  (leitura ou escrita). Uma chave só de leitura não consegue depositar, sacar nem
+  transferir, e a recusa responde `403`, não `401`. A forma final fica a cargo de quem for
+  decidir a autenticação real, mas o modelo de escopo entra já.
+- **Contêiner com privilégio mínimo.** Pendente. No `docker-compose.yml`:
+  `read_only: true`, `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, usuário
+  não-root (já feito na imagem distroless). Segredos vêm de variáveis de ambiente e nunca
+  entram na imagem.
+- **Dependências e exposição mínimas.** Pendente. Conferir que o binário não carrega
+  ferramentas de migração e que a porta do Postgres não é publicada para fora do host, a
+  não ser quando o `loadtest` precisar dela.
 
-Pode ser feito a qualquer momento depois da Fase E. É mais barato fazer antes da migração
-`000002` (X1), para que ela já nasça com as permissões certas.
-
-**Pronto quando:** o teste de permissão passa como `wallet_app`, uma chave de leitura é
-recusada em escrita, e `docker compose up` sobe o app com as restrições acima sem erro.
+**Pronto quando:** o teste de permissão passa como `wallet_app` (✅), uma chave de leitura
+é recusada em escrita (pendente), e `docker compose up` sobe o app com as restrições de
+contêiner acima sem erro (pendente).
 
 ---
 

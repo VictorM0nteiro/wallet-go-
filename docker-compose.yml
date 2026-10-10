@@ -54,7 +54,10 @@ services:
     environment:
       WALLET_TRANSFER_STRATEGY: ${WALLET_TRANSFER_STRATEGY:-locking}
       WALLET_DB_MAX_CONNS: ${WALLET_DB_MAX_CONNS:-30}
-      DATABASE_URL: postgres://wallet:wallet@postgres:5432/wallet?sslmode=disable
+      # wallet_app is the least-privilege role from migration 000002 (X8):
+      # no UPDATE/DELETE on entries, UPDATE only on idempotency_keys' state
+      # columns. migrate above still runs as wallet, the schema owner.
+      DATABASE_URL: postgres://wallet_app:wallet_app_dev@postgres:5432/wallet?sslmode=disable
       WALLET_API_KEY: dev-key
       LISTEN_ADDR: :8080
     ports:
