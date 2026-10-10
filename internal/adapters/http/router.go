@@ -17,6 +17,7 @@ type Deps struct {
 	Transfers      transferService
 	DB             Pinger
 	APIKey         string
+	ReadOnlyAPIKey string
 	RequestTimeout time.Duration
 	Logger         *slog.Logger
 }
@@ -40,13 +41,17 @@ func NewRouter(d Deps) http.Handler {
 	r.Get("/readyz", readyz(d.DB))
 
 	r.Group(func(r chi.Router) {
-		r.Use(apiKeyAuth(d.APIKey))
-		r.Post("/accounts", h.createAccount)
-		r.Post("/accounts/{id}/deposits", h.deposit)
-		r.Post("/accounts/{id}/withdrawals", h.withdraw)
-		r.Post("/transfers", h.transfer)
+		r.Use(apiKeyAuth(d.APIKey, d.ReadOnlyAPIKey))
 		r.Get("/accounts/{id}/balance", h.balance)
 		r.Get("/accounts/{id}/entries", h.entries)
+
+		r.Group(func(r chi.Router) {
+			r.Use(requireWriteScope)
+			r.Post("/accounts", h.createAccount)
+			r.Post("/accounts/{id}/deposits", h.deposit)
+			r.Post("/accounts/{id}/withdrawals", h.withdraw)
+			r.Post("/transfers", h.transfer)
+		})
 	})
 	return r
 }

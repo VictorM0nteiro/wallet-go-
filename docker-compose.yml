@@ -22,7 +22,9 @@ services:
       POSTGRES_PASSWORD: wallet
       POSTGRES_DB: wallet
     ports:
-      - "5432:5432"
+      # Bound to loopback only: reachable from this host (psql, loadtest,
+      # pgbench), not from the LAN. Nothing in this project needs more.
+      - "127.0.0.1:5432:5432"
     volumes:
       - wallet_pgdata:/var/lib/postgresql/data
       - ./deploy/postgres/init:/docker-entrypoint-initdb.d:ro
@@ -46,6 +48,17 @@ services:
   app:
     build: .
     restart: on-failure
+    # Least privilege at the container level (X8). Scoped to app, the image
+    # this project actually builds: postgres and migrate are third-party
+    # images with their own init-time writes, and hardening them the same
+    # way is a separate, riskier change not done here.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       postgres:
         condition: service_healthy
@@ -61,7 +74,7 @@ services:
       WALLET_API_KEY: dev-key
       LISTEN_ADDR: :8080
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
 
 volumes:
   wallet_pgdata:

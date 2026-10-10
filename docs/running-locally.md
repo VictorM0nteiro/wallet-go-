@@ -23,7 +23,8 @@ cp .env.example .env
 | Variable         | Required | Default | Description                                   |
 |------------------|----------|---------|-----------------------------------------------|
 | `DATABASE_URL`   | yes      |         | PostgreSQL connection string                  |
-| `WALLET_API_KEY` | yes      |         | Static API key expected in the `X-API-Key` header |
+| `WALLET_API_KEY` | yes      |         | Static API key expected in the `X-API-Key` header; can do everything |
+| `WALLET_API_KEY_READONLY` | no |     | A second key that can only read (`balance`, `entries`); anything else answers `403`. Unset disables the check. |
 | `LISTEN_ADDR`    | no       | `:8080` | Address the HTTP server listens on            |
 | `WALLET_TRANSFER_STRATEGY` | no | `locking` | Concurrency strategy for transfers: `locking` or `serializable`. See [concurrency-strategies.md](concurrency-strategies.md). |
 
@@ -130,6 +131,7 @@ Errors are returned as `{"error":{"code":"...","message":"..."}}`.
 |--------|-----------------------------------------------------------------------------------|
 | 400    | `bad_request` (invalid JSON, unknown field, missing `Idempotency-Key`, bad UUID)  |
 | 401    | `unauthorized`                                                                    |
+| 403    | `forbidden` (a `WALLET_API_KEY_READONLY` key used on a write endpoint)            |
 | 404    | `account_not_found`                                                               |
 | 409    | `account_already_exists`, `request_in_flight`                                     |
 | 422    | `invalid_amount`, `same_account`, `insufficient_funds`, `idempotency_key_reuse`, `invalid_owner`, `amount_overflow` |

@@ -506,21 +506,27 @@ deixa de depender só da disciplina no código e passa a ser imposta pelo banco.
   corrigir `newTestPool`: a migração 000002 quebrava a suíte inteira porque o container de
   teste nunca tinha o role `wallet_app` — bug real, não hipotético, encontrado ao fechar
   este item.
-- **Chaves de API com escopo.** Pendente. A chave estática da Sessão 5 passa a ter escopo
-  (leitura ou escrita). Uma chave só de leitura não consegue depositar, sacar nem
-  transferir, e a recusa responde `403`, não `401`. A forma final fica a cargo de quem for
-  decidir a autenticação real, mas o modelo de escopo entra já.
-- **Contêiner com privilégio mínimo.** Pendente. No `docker-compose.yml`:
-  `read_only: true`, `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, usuário
-  não-root (já feito na imagem distroless). Segredos vêm de variáveis de ambiente e nunca
-  entram na imagem.
-- **Dependências e exposição mínimas.** Pendente. Conferir que o binário não carrega
-  ferramentas de migração e que a porta do Postgres não é publicada para fora do host, a
-  não ser quando o `loadtest` precisar dela.
+- **Chaves de API com escopo.** ✅ `WALLET_API_KEY_READONLY` (opcional) só lê `balance` e
+  `entries`; qualquer rota que cria conta ou move dinheiro responde `403 forbidden`, não
+  `401` — a credencial é válida, só não pode isso. `TestReadOnlyAPIKey` cobre os dois
+  lados (a chave de leitura recusada, a de escrita intocada) e a ausência de confusão
+  entre chave errada (`401`) e chave sem permissão (`403`).
+- **Contêiner com privilégio mínimo.** ✅ No `docker-compose.yml`, serviço `app`:
+  `read_only: true` (com `tmpfs: [/tmp]`), `cap_drop: [ALL]`, `no-new-privileges:true`,
+  usuário não-root (já feito na imagem distroless). Testado de ponta a ponta com o fluxo
+  completo de conta/depósito/transferência. Escopo consciente: `postgres` e `migrate` são
+  imagens de terceiros com escritas próprias de inicialização, e não foram endurecidas da
+  mesma forma.
+- **Dependências e exposição mínimas.** ✅ O binário final tem só `/wallet`, sem ferramenta
+  de migração (confirmado lendo o `Dockerfile`: a imagem distroless só recebe o binário
+  compilado). As portas `5432` e `8080` passaram de publicadas em todas as interfaces para
+  `127.0.0.1:...`: alcançáveis deste host (psql, `loadtest`, `pgbench`, os `curl` dos
+  exemplos), não da rede local.
 
 **Pronto quando:** o teste de permissão passa como `wallet_app` (✅), uma chave de leitura
-é recusada em escrita (pendente), e `docker compose up` sobe o app com as restrições de
-contêiner acima sem erro (pendente).
+é recusada em escrita (✅), e `docker compose up` sobe o app com as restrições de
+contêiner acima sem erro (✅). X8 completo, com a ressalva de `wallet_migrator` registrada
+acima.
 
 ---
 

@@ -87,9 +87,10 @@ docker compose --profile tools run --rm migrate
 | GET  | `/accounts/{id}/balance` | yes | — |
 | GET  | `/accounts/{id}/entries` | yes | — |
 
-Auth is a static API key in the `X-API-Key` header. Full request/response shapes, error
-codes, and a ready-to-import Postman collection are in
-[docs/running-locally.md](docs/running-locally.md).
+Auth is a static API key in the `X-API-Key` header. An optional second key
+(`WALLET_API_KEY_READONLY`) can read but not write: anything that moves money or creates
+an account answers `403` for it. Full request/response shapes, error codes, and a
+ready-to-import Postman collection are in [docs/running-locally.md](docs/running-locally.md).
 
 `/healthz` reports only that the process is alive and never depends on the database;
 `/readyz` reports whether the database is currently reachable. They are split on purpose —

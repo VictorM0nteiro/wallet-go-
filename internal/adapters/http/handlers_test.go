@@ -104,6 +104,77 @@ func TestAPIKeyIsRequired(t *testing.T) {
 	}
 }
 
+// TestReadOnlyAPIKey covers the X8 scope rule: a second key can read but
+// not move money or create accounts, and the original key is unaffected.
+func TestReadOnlyAPIKey(t *testing.T) {
+	h := NewRouter(Deps{
+		Accounts:       &fakeAccounts{},
+		Cash:           &fakeCash{},
+		Transfers:      fakeTransfers{},
+		DB:             fakePinger{},
+		APIKey:         "secret",
+		ReadOnlyAPIKey: "readonly-secret",
+		RequestTimeout: testRequestTimeout,
+		Logger:         testLogger(),
+	})
+	accountID := uuid.NewString()
+	readOnly := map[string]string{"X-API-Key": "readonly-secret"}
+
+	t.Run("read-only key can read balance and entries", func(t *testing.T) {
+		rec := doRequest(h, http.MethodGet, "/accounts/"+accountID+"/balance", "", readOnly)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+		}
+		rec = doRequest(h, http.MethodGet, "/accounts/"+accountID+"/entries", "", readOnly)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("read-only key cannot create an account", func(t *testing.T) {
+		rec := doRequest(h, http.MethodPost, "/accounts", `{"owner_id":"ana"}`, readOnly)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403: %s", rec.Code, rec.Body.String())
+		}
+		if code := errorCode(t, rec); code != "forbidden" {
+			t.Errorf("error code = %q, want forbidden", code)
+		}
+	})
+
+	t.Run("read-only key cannot deposit, withdraw or transfer", func(t *testing.T) {
+		headers := map[string]string{"X-API-Key": "readonly-secret", "Idempotency-Key": "k-ro-1"}
+		for _, path := range []string{
+			"/accounts/" + accountID + "/deposits",
+			"/accounts/" + accountID + "/withdrawals",
+		} {
+			rec := doRequest(h, http.MethodPost, path, `{"amount_cents":100}`, headers)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("%s: status = %d, want 403: %s", path, rec.Code, rec.Body.String())
+			}
+		}
+		rec := doRequest(h, http.MethodPost, "/transfers",
+			`{"from_account_id":"`+accountID+`","to_account_id":"`+uuid.NewString()+`","amount_cents":100}`, headers)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("the write key is unaffected", func(t *testing.T) {
+		rec := doRequest(h, http.MethodPost, "/accounts", `{"owner_id":"ana"}`, nil)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("an unknown key is still 401, not 403", func(t *testing.T) {
+		rec := doRequest(h, http.MethodGet, "/accounts/"+accountID+"/balance", "",
+			map[string]string{"X-API-Key": "nonsense"})
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401: %s", rec.Code, rec.Body.String())
+		}
+	})
+}
+
 func TestRequestIDIsGeneratedAndPreserved(t *testing.T) {
 	h := newTestHandler(&fakeCash{}, &fakeAccounts{})
 	path := "/accounts/" + uuid.NewString() + "/balance"

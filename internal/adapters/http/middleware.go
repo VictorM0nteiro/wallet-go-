@@ -14,9 +14,22 @@ import (
 
 type ctxKey int
 
-const requestIDKey ctxKey = iota
+const (
+	requestIDKey ctxKey = iota
+	apiKeyScopeKey
+)
 
 const maxRequestIDLength = 128
+
+// apiKeyScope is which of the two keys apiKeyAuth matched. There is no
+// "unauthenticated" value here on purpose: requireWriteScope only runs after
+// apiKeyAuth already accepted the request.
+type apiKeyScope int
+
+const (
+	scopeWrite apiKeyScope = iota
+	scopeRead
+)
 
 func requestIDFrom(ctx context.Context) string {
 	id, _ := ctx.Value(requestIDKey).(string)
@@ -115,19 +128,46 @@ func timeout(d time.Duration) func(http.Handler) http.Handler {
 	}
 }
 
-// apiKeyAuth is the only authentication in scope: one static key.
-func apiKeyAuth(key string) func(http.Handler) http.Handler {
-	want := []byte(key)
+// apiKeyAuth accepts the write key (full access) and, if readKey is not
+// empty, a second read-only key. Which one matched is stashed in the
+// request context as an apiKeyScope, for requireWriteScope to check later
+// — apiKeyAuth itself only decides "is this key valid at all".
+func apiKeyAuth(writeKey, readKey string) func(http.Handler) http.Handler {
+	wantWrite := []byte(writeKey)
+	wantRead := []byte(readKey)
+	hasReadKey := readKey != ""
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			got := []byte(r.Header.Get("X-API-Key"))
-			if subtle.ConstantTimeCompare(got, want) != 1 {
+			var scope apiKeyScope
+			switch {
+			case subtle.ConstantTimeCompare(got, wantWrite) == 1:
+				scope = scopeWrite
+			case hasReadKey && subtle.ConstantTimeCompare(got, wantRead) == 1:
+				scope = scopeRead
+			default:
 				writeJSON(w, http.StatusUnauthorized, errorResponse{
 					Error: errorBody{Code: "unauthorized", Message: "missing or invalid API key"},
 				})
 				return
 			}
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), apiKeyScopeKey, scope)))
 		})
 	}
+}
+
+// requireWriteScope sits in front of every money-moving or account-creating
+// route. A read-only key already passed apiKeyAuth — the credential is
+// valid — but is rejected here with 403, not 401: it just cannot do this.
+func requireWriteScope(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		scope, _ := r.Context().Value(apiKeyScopeKey).(apiKeyScope)
+		if scope != scopeWrite {
+			writeJSON(w, http.StatusForbidden, errorResponse{
+				Error: errorBody{Code: "forbidden", Message: "this API key is read-only"},
+			})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

@@ -22,11 +22,12 @@ import (
 )
 
 type config struct {
-	dsn      string
-	apiKey   string
-	addr     string
-	strategy string
-	maxConns int32
+	dsn            string
+	apiKey         string
+	readOnlyAPIKey string
+	addr           string
+	strategy       string
+	maxConns       int32
 }
 
 func loadConfig() (config, error) {
@@ -62,7 +63,19 @@ func loadConfig() (config, error) {
 		maxConns = int32(n)
 	}
 
-	return config{dsn: dsn, apiKey: apiKey, addr: addr, strategy: strategy, maxConns: maxConns}, nil
+	// Optional: a second key that can only read (balance, entries), rejected
+	// with 403 on anything that moves money or creates an account. Empty
+	// means the feature is off and WALLET_API_KEY can do everything, as
+	// before.
+	readOnlyAPIKey := os.Getenv("WALLET_API_KEY_READONLY")
+	if readOnlyAPIKey != "" && readOnlyAPIKey == apiKey {
+		return config{}, errors.New("WALLET_API_KEY_READONLY must be different from WALLET_API_KEY")
+	}
+
+	return config{
+		dsn: dsn, apiKey: apiKey, readOnlyAPIKey: readOnlyAPIKey,
+		addr: addr, strategy: strategy, maxConns: maxConns,
+	}, nil
 
 }
 
@@ -122,6 +135,7 @@ func run() error {
 			Transfers:      transfers,
 			DB:             pool,
 			APIKey:         cfg.apiKey,
+			ReadOnlyAPIKey: cfg.readOnlyAPIKey,
 			RequestTimeout: 5 * time.Second,
 			Logger:         logger,
 		}),
