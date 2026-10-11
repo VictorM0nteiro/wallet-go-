@@ -44,8 +44,9 @@ executor then:
 - waits a random time up to an exponential ceiling (5 ms doubling, capped at 200 ms,
   full jitter) before the next attempt, so retrying transactions do not collide again in
   step;
-- gives up after 10 attempts and returns an error that wraps the last serialization
-  failure;
+- gives up after 10 attempts and returns `app.ErrConcurrencyConflict` (wrapping the last
+  serialization failure), mapped to `409 concurrent_conflict` — nothing committed, so the
+  same request, same `Idempotency-Key` included, is safe to retry;
 - counts every retry. The count is exposed through `Retries()` and logged at shutdown.
 
 Only `40001` and `40P01` are retried. Domain errors, such as insufficient funds, return

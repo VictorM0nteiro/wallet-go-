@@ -22,6 +22,7 @@ func TestStatusFor(t *testing.T) {
 		{"conta_inexistente", domain.ErrAccountNotFound, http.StatusNotFound, "account_not_found"},
 		{"conta_duplicada", domain.ErrAccountAlreadyExists, http.StatusConflict, "account_already_exists"},
 		{"requisicao_em_voo", app.ErrRequestInFlight, http.StatusConflict, "request_in_flight"},
+		{"conflito_de_concorrencia", app.ErrConcurrencyConflict, http.StatusConflict, "concurrent_conflict"},
 		{"chave_com_corpo_diferente", app.ErrIdempotencyKeyReuse, http.StatusUnprocessableEntity, "idempotency_key_reuse"},
 		{"saldo_insuficiente", domain.ErrInsufficientFunds, http.StatusUnprocessableEntity, "insufficient_funds"},
 		{"valor_invalido", domain.ErrInvalidAmount, http.StatusUnprocessableEntity, "invalid_amount"},

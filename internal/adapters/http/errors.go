@@ -41,6 +41,8 @@ func statusFor(err error) (int, string) {
 		return http.StatusUnprocessableEntity, "amount_overflow"
 	case errors.Is(err, app.ErrInvalidOwner):
 		return http.StatusUnprocessableEntity, "invalid_owner"
+	case errors.Is(err, app.ErrConcurrencyConflict):
+		return http.StatusConflict, "concurrent_conflict"
 	case errors.Is(err, context.DeadlineExceeded):
 		return http.StatusServiceUnavailable, "service_unavailable"
 	default:

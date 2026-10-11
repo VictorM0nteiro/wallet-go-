@@ -54,7 +54,8 @@ func (e *SerializableTransferExecutor) InTx(ctx context.Context, fn func(context
 			return err
 		}
 		if attempt >= e.maxAttempts {
-			return fmt.Errorf("postgres: serializable transfer gave up after %d attempts: %w", attempt, err)
+			return fmt.Errorf("postgres: serializable transfer gave up after %d attempts: %w: %w",
+				attempt, app.ErrConcurrencyConflict, err)
 		}
 		e.retries.Add(1)
 		if err := sleepBackoff(ctx, attempt); err != nil {

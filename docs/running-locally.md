@@ -133,7 +133,7 @@ Errors are returned as `{"error":{"code":"...","message":"..."}}`.
 | 401    | `unauthorized`                                                                    |
 | 403    | `forbidden` (a `WALLET_API_KEY_READONLY` key used on a write endpoint)            |
 | 404    | `account_not_found`                                                               |
-| 409    | `account_already_exists`, `request_in_flight`                                     |
+| 409    | `account_already_exists`, `request_in_flight`, `concurrent_conflict`             |
 | 422    | `invalid_amount`, `same_account`, `insufficient_funds`, `idempotency_key_reuse`, `invalid_owner`, `amount_overflow` |
 | 503    | `service_unavailable` (request or database timeout)                               |
 | 500    | `internal_error`                                                                  |

@@ -219,9 +219,18 @@ run index, not in the JSON.
 **Decisions left to the author** (the analysis of why each strategy behaves this way is for the
 author to write, as the project's working rules say):
 
-- Whether the `500` under retry exhaustion is acceptable, or whether it should be a retryable
-  status such as `503` or `409` (see the open item on `maxAttempts` below).
-- Whether to raise `maxAttempts` (currently 10) and measure again.
+- ~~Whether the `500` under retry exhaustion is acceptable, or whether it should be a
+  retryable status.~~ Resolved: `409 concurrent_conflict`, not `503` — the request
+  conflicted with concurrent transactions, the service itself is fine, and the same
+  request (same `Idempotency-Key`) is safe to retry since nothing committed. See
+  `app.ErrConcurrencyConflict` and `statusFor` in `internal/adapters/http/errors.go`.
+  Verified against the real container: `hot`, `serializable`, 64 workers reproduced
+  `status=map[201:2027 409:840]` — zero `500`, where this exact run used to produce them
+  (section 6). Ledger consistency still passed.
+  (`docs/bench/hot-seed1-20261010-221520.json`, a verification run, not part of the
+  measurement series above.)
+- Decided not to raise `maxAttempts` (currently 10): the retry counts measured in this
+  section (10k to 70k per run) point at structural contention, not "needed one more try".
 - Whether the strategy should be recorded in the JSON (the `-strategy` flag), so that a future
   run does not depend on the `.env` state.
 
