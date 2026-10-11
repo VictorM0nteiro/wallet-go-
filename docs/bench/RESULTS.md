@@ -295,6 +295,93 @@ and `db_max_conns` at startup. Changing either no longer needs an image rebuild,
 `docker compose up -d app` — the exact mistake that produced the mislabeled blocks B and
 D in section 2 is no longer possible this way.
 
+## 8. Domain benchmarks and pprof on the winning strategy (Session 9)
+
+Session 9 of the execution plan asks for two things the sections above don't cover: the
+domain's own cost (`go test -bench -benchmem`), and a CPU/heap profile of the winning
+strategy under high contention. "Winning" here means `locking`: sections 6 and 7 show it
+ahead of `serializable` on both `hot` and `spread`, by a wide margin, every time it was
+measured.
+
+### Domain benchmarks
+
+```
+go test ./internal/domain/ -bench . -benchmem
+```
+
+| Benchmark | ns/op | B/op | allocs/op |
+|---|---|---|---|
+| `CanDebit` (customer account) | 2.60 | 0 | 0 |
+| `CanDebit` (system account) | 1.24 | 0 | 0 |
+| `NewTransferAmount` | 0.41 | 0 | 0 |
+| `Money.Add` | 0.34 | 0 | 0 |
+
+Zero allocations, low single-digit nanoseconds. The domain layer is pure arithmetic with
+no I/O, and this confirms it costs nothing measurable next to a database round trip
+(milliseconds). Whatever a transfer's latency is made of, it is not this.
+
+### `BenchmarkLockingTransfer_HotContention`
+
+Same shape as the loadtest's `hot` scenario — every parallel goroutine transfers between
+the same two accounts — but calling `LockingTransferExecutor.Execute` directly (bypasses
+idempotency, to profile the executor itself):
+
+```
+go test ./internal/adapters/postgres/ -run '^$' \
+  -bench BenchmarkLockingTransfer_HotContention -benchtime 20s \
+  -cpuprofile docs/bench/pprof/locking-hot-cpu.out \
+  -memprofile docs/bench/pprof/locking-hot-mem.out
+```
+
+Result: **9964 iterations, 2.72 ms/op** average over a 20 s run (consistent with the
+~300-500 req/s this project has measured for `hot`/`locking` elsewhere in this document —
+this is one goroutine-level view of the same ceiling, not a new number to compare against
+it).
+
+**CPU profile top (`docs/bench/pprof/locking-hot-cpu-top.txt`):**
+
+```
+      flat  flat%   sum%        cum   cum%
+    33.73s 95.15% 95.15%     33.74s 95.18%  runtime.cgocall
+     0.06s  0.17% 95.32%      0.19s  0.54%  runtime.netpoll
+     0.03s 0.085% 95.40%      0.21s  0.59%  runtime.mallocgc
+     0.01s 0.028% 95.66%     32.38s 91.34%  github.com/Microsoft/go-winio.getQueuedCompletionStatus
+     0.01s 0.028% 95.74%      1.34s  3.78%  .../pgconn.(*PgConn).flushWithPotentialWriteReadDeadlock
+```
+
+`getQueuedCompletionStatus` is Windows' I/O completion port wait — the mechanism
+`runtime.netpoll` blocks on for any network read on this OS. 91% of the "CPU" time this
+profile reports is a goroutine parked waiting for the TCP round trip to Postgres, not the
+Go process computing anything. Everything pgx and this project's own code do to build and
+decode one query together account for under 5%.
+
+**Heap profile top, `alloc_space`, i.e. total allocated over the run — not a leak measure
+(`docs/bench/pprof/locking-hot-mem-alloc-top.txt`):**
+
+```
+      flat  flat%   sum%        cum   cum%
+      14MB 10.61% 10.61%       14MB 10.61%  fmt.errorf
+   10.50MB  7.96% 18.57%       19MB 14.40%  .../pgconn/ctxwatch.(*ContextWatcher).Watch
+    6.50MB  4.93% 40.54%    62.50MB 47.36%  .../pgtype.(*encodePlanDriverValuer).Encode
+    5.50MB  4.17% 48.88%    94.01MB 71.23%  (*lockingTx).Execute
+```
+
+131.98 MB allocated in total over the run (9964 transfers) — about 13 KB per transfer,
+mostly pgx's own UUID and parameter encoding machinery. `inuse_space` (live at any one
+snapshot) was 4.6 MB, so none of it leaks; the garbage collector keeps up.
+
+One line is unexplained and noted rather than chased further: `fmt.errorf` at 10.6% of
+total allocation, despite this benchmark never hitting an error path (it never fails).
+Either some non-error-path code in the dependency chain still builds an `error` value it
+discards, or profile samples from the container-startup/migration code that ran earlier
+in the same process (the benchmark calibration restarts the whole test container two or
+three times before the timed run) are mixed into this total. Not resolved here.
+
+**Pronto quando** (Session 9): the `pprof` capture and the `benchmem` run both exist and
+are committed under `docs/bench/pprof/` and in this section — done. The write-up of *why*
+locking wins, and under what load the order would flip, is Session 10's job, not this
+one.
+
 ## Still open
 
 - **More repetitions of the 20 to 50 connection blocks**, to separate the values inside the

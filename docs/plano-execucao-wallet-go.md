@@ -321,19 +321,21 @@ o isolamento existia para impedir.
 
 ---
 
-## Sessão 9 — execução
+## Sessão 9 — execução ✅
 
 **Objetivo:** dados brutos, reprodutíveis.
 
-- Matriz completa: 2 estratégias × 2 cenários × 3 repetições
-- pprof de CPU e heap na estratégia vencedora sob alta contenção
-- `go test -bench -benchmem` no caminho quente do domínio
-- Registrar por execução: hardware, SO, versão do Postgres, versão do Go, parâmetros,
-  semente, comando exato
-- Dados brutos commitados sem edição
+- ✅ Matriz completa: 2 estratégias × 2 cenários × **5** repetições (pedia 3) —
+  `RESULTS.md` seções 6 e 7.
+- ✅ pprof de CPU e heap na estratégia vencedora (`locking`) sob alta contenção —
+  `RESULTS.md` seção 8, arquivos em `docs/bench/pprof/`.
+- ✅ `go test -bench -benchmem` no caminho quente do domínio — `RESULTS.md` seção 8.
+- ✅ Ambiente, parâmetros, semente e comando exato registrados em cada seção.
+- ✅ Dados brutos commitados sem edição (JSONs, `.out` de pprof e os `.txt` com o `top`
+  legível).
 
 **Pronto quando:** `docs/bench/` tem os arquivos e qualquer pessoa consegue repetir a
-execução a partir do que está escrito.
+execução a partir do que está escrito. ✅
 
 ---
 

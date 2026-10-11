@@ -1,0 +1,24 @@
+File: postgres.test.exe
+Build ID: C:\Users\User\AppData\Local\Temp\go-build3232160835\b001\postgres.test.exe2026-10-10 22:26:13.8235129 -0300 -03
+Type: cpu
+Time: 2026-10-10 22:26:14 -03
+Duration: 33.29s, Total samples = 35.45s (106.48%)
+Showing nodes accounting for 33.98s, 95.85% of 35.45s total
+Dropped 312 nodes (cum <= 0.18s)
+Showing top 15 nodes out of 62
+      flat  flat%   sum%        cum   cum%
+    33.73s 95.15% 95.15%     33.74s 95.18%  runtime.cgocall
+     0.06s  0.17% 95.32%      0.19s  0.54%  runtime.netpoll
+     0.03s 0.085% 95.40%      0.21s  0.59%  runtime.mallocgc
+     0.02s 0.056% 95.46%      0.29s  0.82%  github.com/jackc/pgx/v5/pgproto3.(*Frontend).Receive
+     0.02s 0.056% 95.51%      0.26s  0.73%  github.com/jackc/pgx/v5/pgproto3.(*chunkReader).Next
+     0.02s 0.056% 95.57%      1.43s  4.03%  internal/poll.(*FD).execIO
+     0.02s 0.056% 95.63%      0.18s  0.51%  runtime.newobject
+     0.01s 0.028% 95.66%     32.38s 91.34%  github.com/Microsoft/go-winio.getQueuedCompletionStatus
+     0.01s 0.028% 95.68%      0.24s  0.68%  github.com/jackc/pgx/v5.(*Conn).BeginTx
+     0.01s 0.028% 95.71%      1.08s  3.05%  github.com/jackc/pgx/v5.(*Conn).Query
+     0.01s 0.028% 95.74%      0.46s  1.30%  github.com/jackc/pgx/v5.(*ExtendedQueryBuilder).appendParam
+     0.01s 0.028% 95.77%      1.34s  3.78%  github.com/jackc/pgx/v5/pgconn.(*PgConn).flushWithPotentialWriteReadDeadlock
+     0.01s 0.028% 95.80%      0.20s  0.56%  github.com/jackc/pgx/v5/pgconn.(*ResultReader).receiveMessage
+     0.01s 0.028% 95.83%      0.23s  0.65%  github.com/jackc/pgx/v5/pgconn/internal/bgreader.(*BGReader).Read
+     0.01s 0.028% 95.85%      0.41s  1.16%  github.com/jackc/pgx/v5/pgtype.(*encodePlanDriverValuer).Encode

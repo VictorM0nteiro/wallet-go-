@@ -31,7 +31,9 @@ const (
 // newTestPool starts a throwaway Postgres container, applies every
 // migration in migrations/, and returns a ready-to-use *Pool. The
 // container and the pool are torn down automatically via t.Cleanup.
-func newTestPool(t *testing.T) *Pool {
+// testing.TB (not *testing.T) so benchmarks can call it too — Session 9's
+// pprof profiling runs as a *testing.B against the same real container.
+func newTestPool(t testing.TB) *Pool {
 	t.Helper()
 	pool, _ := newTestPoolWithDSN(t)
 	return pool
@@ -39,7 +41,7 @@ func newTestPool(t *testing.T) *Pool {
 
 // newTestPoolWithDSN is newTestPool plus the owner DSN, for tests that also
 // need to connect as wallet_app (see appDSN) to check its grants directly.
-func newTestPoolWithDSN(t *testing.T) (*Pool, string) {
+func newTestPoolWithDSN(t testing.TB) (*Pool, string) {
 	t.Helper()
 	ctx := context.Background()
 

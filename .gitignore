@@ -1,2 +1,8 @@
 CLAUDE.md
 .env
+
+# go test -cpuprofile/-memprofile leaves the compiled test binary in the
+# current directory on purpose (pprof needs it to resolve symbols), named
+# after the package under test.
+*.test
+*.test.exe

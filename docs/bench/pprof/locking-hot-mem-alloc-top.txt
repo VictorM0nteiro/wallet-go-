@@ -1,0 +1,23 @@
+File: postgres.test.exe
+Build ID: C:\Users\User\AppData\Local\Temp\go-build3232160835\b001\postgres.test.exe2026-10-10 22:26:13.8235129 -0300 -03
+Type: alloc_space
+Time: 2026-10-10 22:26:47 -03
+Showing nodes accounting for 91.01MB, 68.95% of 131.98MB total
+Dropped 166 nodes (cum <= 0.66MB)
+Showing top 15 nodes out of 195
+      flat  flat%   sum%        cum   cum%
+      14MB 10.61% 10.61%       14MB 10.61%  fmt.errorf
+   10.50MB  7.96% 18.57%       19MB 14.40%  github.com/jackc/pgx/v5/pgconn/ctxwatch.(*ContextWatcher).Watch
+       8MB  6.06% 24.63%     8.50MB  6.44%  context.AfterFunc
+       8MB  6.06% 30.69%    15.50MB 11.74%  github.com/jackc/pgx/v5/pgtype.scanPlanTextAnyToUUIDScanner.Scan
+    6.50MB  4.93% 35.62%     6.50MB  4.93%  github.com/jackc/pgx/v5.(*Conn).getRows
+    6.50MB  4.93% 40.54%    62.50MB 47.36%  github.com/jackc/pgx/v5/pgtype.(*encodePlanDriverValuer).Encode
+    5.50MB  4.17% 44.71%     5.50MB  4.17%  github.com/google/uuid.UUID.String (inline)
+    5.50MB  4.17% 48.88%    94.01MB 71.23%  github.com/VictorM0nteiro/wallet-go/internal/adapters/postgres.(*lockingTx).Execute
+    4.50MB  3.41% 52.28%       20MB 15.15%  github.com/jackc/pgx/v5/pgtype.UUIDCodec.DecodeValue
+       4MB  3.03% 55.32%     7.50MB  5.68%  github.com/jackc/pgx/v5/pgtype.parseUUID
+       4MB  3.03% 58.35%     9.50MB  7.20%  github.com/google/uuid.UUID.Value
+       4MB  3.03% 61.38%       18MB 13.64%  github.com/jackc/pgx/v5/pgtype.newEncodeError
+    3.50MB  2.65% 64.03%     3.50MB  2.65%  github.com/jackc/pgx/v5/pgtype.(*Map).planScan
+    3.50MB  2.65% 66.68%     3.50MB  2.65%  encoding/hex.DecodeString
+       3MB  2.27% 68.95%     3.50MB  2.65%  context.WithDeadlineCause

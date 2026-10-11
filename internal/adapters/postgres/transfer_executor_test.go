@@ -12,7 +12,7 @@ import (
 	"github.com/VictorM0nteiro/wallet-go/internal/domain"
 )
 
-func newTestAccount(t *testing.T, repo *AccountRepository, owner string, kind domain.AccountKind) uuid.UUID {
+func newTestAccount(t testing.TB, repo *AccountRepository, owner string, kind domain.AccountKind) uuid.UUID {
 	t.Helper()
 	a := app.Account{ID: uuid.New(), OwnerID: owner, Kind: kind, Currency: "BRL"}
 	if err := repo.Create(context.Background(), a); err != nil {
@@ -21,7 +21,7 @@ func newTestAccount(t *testing.T, repo *AccountRepository, owner string, kind do
 	return a.ID
 }
 
-func mustTransfer(t *testing.T, exec seeder, from, to uuid.UUID, cents int64) {
+func mustTransfer(t testing.TB, exec seeder, from, to uuid.UUID, cents int64) {
 	t.Helper()
 	req := app.TransferRequest{ID: uuid.New(), FromAccountID: from, ToAccountID: to, Amount: domain.NewMoney(cents)}
 	if err := exec.Execute(context.Background(), req); err != nil {

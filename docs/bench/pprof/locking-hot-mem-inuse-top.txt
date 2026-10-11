@@ -1,0 +1,22 @@
+File: postgres.test.exe
+Build ID: C:\Users\User\AppData\Local\Temp\go-build3232160835\b001\postgres.test.exe2026-10-10 22:26:13.8235129 -0300 -03
+Type: inuse_space
+Time: 2026-10-10 22:26:47 -03
+Showing nodes accounting for 4614.83kB, 100% of 4614.83kB total
+Showing top 15 nodes out of 84
+      flat  flat%   sum%        cum   cum%
+ 2050.11kB 44.42% 44.42%  2050.11kB 44.42%  runtime.mallocgc
+  514.63kB 11.15% 55.58%  1026.65kB 22.25%  encoding/json.typeFields
+     514kB 11.14% 66.71%      514kB 11.14%  hash/crc32.archInitCastagnoli
+  512.05kB 11.10% 77.81%   512.05kB 11.10%  io.(*pipe).read
+  512.02kB 11.10% 88.91%   512.02kB 11.10%  internal/sync.newEntryNode[go.shape.interface {},go.shape.interface {}] (inline)
+  512.02kB 11.09%   100%   512.02kB 11.09%  syscall.(*DLL).FindProc
+         0     0%   100%  1026.65kB 22.25%  encoding/json.(*encodeState).marshal
+         0     0%   100%  1026.65kB 22.25%  encoding/json.(*encodeState).reflectValue
+         0     0%   100%  1026.65kB 22.25%  encoding/json.Marshal
+         0     0%   100%  1026.65kB 22.25%  encoding/json.cachedTypeFields
+         0     0%   100%   512.02kB 11.10%  encoding/json.newMapEncoder
+         0     0%   100%   512.02kB 11.10%  encoding/json.newPtrEncoder
+         0     0%   100%  1026.65kB 22.25%  encoding/json.newStructEncoder (inline)
+         0     0%   100%  1026.65kB 22.25%  encoding/json.newTypeEncoder
+         0     0%   100%  1026.65kB 22.25%  encoding/json.typeEncoder
