@@ -119,41 +119,72 @@ func (l *lockingTx) CompleteKey(ctx context.Context, key app.IdempotencyKey, tra
 // Execute locks both accounts in ascending id order, reads the source
 // balance, asks the domain whether the debit is allowed, then inserts the
 // transfer and its two entries.
+//
+// The two FOR UPDATE locks and the balance read go out as one pipelined
+// batch (one network round trip), and so do the three inserts (a second
+// round trip) — down from six round trips in the original one-statement-
+// at-a-time version. Pipelining does not change when each statement runs:
+// Postgres still executes everything sent on one connection strictly in
+// the order received, so lockOrder's deadlock-avoidance guarantee (always
+// lock the lower id first) holds exactly as before. Only the network wait
+// between statements is removed.
 func (l *lockingTx) Execute(ctx context.Context, req app.TransferRequest) error {
-	kinds := make(map[uuid.UUID]domain.AccountKind, 2)
-	for _, id := range lockOrder(req.FromAccountID, req.ToAccountID) {
-		kind, err := lockAccount(ctx, l.tx, id)
-		if err != nil {
-			return err
-		}
-		kinds[id] = kind
-	}
+	ids := lockOrder(req.FromAccountID, req.ToAccountID)
 
-	// The row lock on the source account serializes every transfer touching
-	// it, so this sum cannot change under us until we commit.
-	var balance int64
+	lockBatch := &pgx.Batch{}
+	lockBatch.Queue(`SELECT kind FROM accounts WHERE id = $1 FOR UPDATE`, ids[0])
+	lockBatch.Queue(`SELECT kind FROM accounts WHERE id = $1 FOR UPDATE`, ids[1])
+	// The row locks above serialize every transfer touching these accounts,
+	// so this sum cannot change under us until we commit. Queued in the
+	// same batch: it only needs to run after both locks, not before.
 	const sumQuery = `SELECT COALESCE(SUM(amount_cents), 0) FROM entries WHERE account_id = $1`
-	if err := l.tx.QueryRow(ctx, sumQuery, req.FromAccountID).Scan(&balance); err != nil {
+	lockBatch.Queue(sumQuery, req.FromAccountID)
+
+	lockResults := l.tx.SendBatch(ctx, lockBatch)
+	kinds := make(map[uuid.UUID]domain.AccountKind, 2)
+	for _, id := range ids {
+		var kind string
+		if err := lockResults.QueryRow().Scan(&kind); err != nil {
+			_ = lockResults.Close()
+			if errors.Is(err, pgx.ErrNoRows) {
+				return domain.ErrAccountNotFound
+			}
+			return fmt.Errorf("postgres: lock account: %w", err)
+		}
+		kinds[id] = domain.AccountKind(kind)
+	}
+	var balance int64
+	if err := lockResults.QueryRow().Scan(&balance); err != nil {
+		_ = lockResults.Close()
 		return fmt.Errorf("postgres: read source balance: %w", err)
+	}
+	// Must close before this connection can start the next batch.
+	if err := lockResults.Close(); err != nil {
+		return fmt.Errorf("postgres: lock/balance batch: %w", err)
 	}
 
 	if err := domain.CanDebit(domain.NewMoney(balance), req.Amount, kinds[req.FromAccountID]); err != nil {
 		return err
 	}
 
-	const insertTransfer = `
+	insertBatch := &pgx.Batch{}
+	insertBatch.Queue(`
               INSERT INTO transfers (id, from_account_id, to_account_id, amount_cents, status)
               VALUES ($1, $2, $3, $4, 'completed')
-      `
-	if _, err := l.tx.Exec(ctx, insertTransfer, req.ID, req.FromAccountID, req.ToAccountID, req.Amount.Cents()); err != nil {
+      `, req.ID, req.FromAccountID, req.ToAccountID, req.Amount.Cents())
+	const insertEntry = `INSERT INTO entries (transfer_id, account_id, amount_cents) VALUES ($1, $2, $3)`
+	insertBatch.Queue(insertEntry, req.ID, req.FromAccountID, -req.Amount.Cents())
+	insertBatch.Queue(insertEntry, req.ID, req.ToAccountID, req.Amount.Cents())
+
+	insertResults := l.tx.SendBatch(ctx, insertBatch)
+	defer func() { _ = insertResults.Close() }()
+	if _, err := insertResults.Exec(); err != nil {
 		return fmt.Errorf("postgres: insert transfer: %w", err)
 	}
-
-	const insertEntry = `INSERT INTO entries (transfer_id, account_id, amount_cents) VALUES ($1, $2, $3)`
-	if _, err := l.tx.Exec(ctx, insertEntry, req.ID, req.FromAccountID, -req.Amount.Cents()); err != nil {
+	if _, err := insertResults.Exec(); err != nil {
 		return fmt.Errorf("postgres: insert debit entry: %w", err)
 	}
-	if _, err := l.tx.Exec(ctx, insertEntry, req.ID, req.ToAccountID, req.Amount.Cents()); err != nil {
+	if _, err := insertResults.Exec(); err != nil {
 		return fmt.Errorf("postgres: insert credit entry: %w", err)
 	}
 	return nil
@@ -167,16 +198,4 @@ func lockOrder(a, b uuid.UUID) [2]uuid.UUID {
 		return [2]uuid.UUID{a, b}
 	}
 	return [2]uuid.UUID{b, a}
-}
-
-func lockAccount(ctx context.Context, tx pgx.Tx, id uuid.UUID) (domain.AccountKind, error) {
-	var kind string
-	err := tx.QueryRow(ctx, `SELECT kind FROM accounts WHERE id = $1 FOR UPDATE`, id).Scan(&kind)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return "", domain.ErrAccountNotFound
-		}
-		return "", fmt.Errorf("postgres: lock account: %w", err)
-	}
-	return domain.AccountKind(kind), nil
 }

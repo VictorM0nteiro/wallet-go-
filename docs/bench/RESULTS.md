@@ -382,8 +382,107 @@ are committed under `docs/bench/pprof/` and in this section — done. The write-
 locking wins, and under what load the order would flip, is Session 10's job, not this
 one.
 
+## 9. Round-trip reduction in `locking` (code review, 2026-10-10)
+
+A `/code-review` pass asked specifically how to cross 3500 req/s identified that a single
+transfer in `lockingTx.Execute` made 8 sequential network round trips to Postgres
+(`ClaimKey`, lock A, lock B, read balance, insert transfer, insert debit entry, insert
+credit entry, `CompleteKey`) — consistent with Session 9's pprof finding that ~91% of
+"CPU" time was actually `runtime.netpoll` waiting on the TCP round trip, not computation.
+
+**Fix, locking only, `serializable` untouched:** the two `FOR UPDATE` locks and the
+balance read now go out as one pipelined `pgx.Batch` (one round trip), and the transfer
+insert plus its two entry inserts go out as a second batch. Pipelining does not change
+*when* each statement runs — Postgres still executes everything sent on one connection
+strictly in the order received, so `lockOrder`'s deadlock-avoidance guarantee is
+untouched, only the network wait between statements is removed. Verified with 30 runs of
+the opposite-transfers deadlock test under `-race`: no failures. Round trips per transfer:
+8 → 4.
+
+**Isolated effect** (`BenchmarkLockingTransfer_HotContention`, same 20 s run as Session 9):
+2.72 ms/op → **1.54 ms/op**, roughly 1.8×.
+
+**Effect on `spread`/`locking`**, same settings as section 7 (30 connections, 32 workers,
+seed 42, 5 runs):
+
+| | Median req/s | p99 |
+|---|---|---|
+| Before (section 7) | 3427 | ~74 ms |
+| After | **3551** | ~25 ms |
+
+A real, repeatable gain (tight spread across the 5 runs: 3443 to 3574), and the first time
+this project's numbers cross 3500 req/s.
+
+### Chasing 4000+: pool size, and a methodology trap
+
+With round trips halved, Little's Law suggested the 30-connection pool itself was now the
+binding constraint (median req/s × p50 latency ≈ 25.6 concurrent requests, close to
+saturating 30). Single exploratory runs seemed to confirm it: 50 connections / 48 workers
+→ 3837 req/s; 70 connections / 64 workers → **4306 req/s**.
+
+A proper remeasurement (5 runs each, `-accounts 100`, seed 42, workers = 2× the pool size
+so the pool itself stays the binding constraint) did **not** reproduce a clean curve:
+
+| Connections (workers) | Median req/s | Range | p99 median |
+|---|---|---|---|
+| 30 (60) | 3655 | 3573 to 4487 | 34 ms |
+| 40 (80) | 3638 | 3476 to 4167 | 51 ms |
+| 50 (100) | 3684 | 3349 to 4349 | 74 ms |
+| 60 (120) | 4277 | 3926 to 4469 | 83 ms |
+| 70 (140) | 3798 | 3665 to 3930 | 124 ms |
+
+No clear upward trend, no clear ceiling, and a spread inside every block (16% to 25%)
+wider than the 30-connections/32-workers measurement above (3.6%). The single 4306 req/s
+draw was real but was not the median of its own condition once repeated — it was the
+high end of a noisy distribution, not a reproducible new ceiling.
+
+**The methodology itself is a suspect.** Comparing the two measurements at the *same* 30
+connections: 32 workers gave a tight 3443-3574 range; 60 workers on the identical pool
+gave 3573-4487. Doubling the workers (to keep workers ahead of the pool at every size)
+also doubles how many client goroutines this project's own load generator runs on the
+same 12-thread host that is also running the API and Postgres — exactly the
+"generator and API share the same machine" caveat at the top of this document, now large
+enough to confound the pool-size variable it was meant to isolate.
+
+**Conclusion:** the committed, trustworthy result of this section is **3551 req/s median
+at 30 connections** — tight, repeatable, confirmed past the 3500 target. Whether more
+connections sustain more than that is not answered cleanly by this sweep; the generator's
+own CPU cost at high worker counts, not the database, may be what shows up as "noise"
+above 60 connections. Answering it for real needs either a smaller, fixed workers:pool
+margin (not 2×) repeated more times, or running the load generator on a separate process
+or host from the API — not done here.
+
+### Decision: latency over throughput, stay at 30 connections
+
+Side by side, median against median, latency against the same baseline:
+
+| Config | Median req/s | p50 | p99 | Crossed 4000? |
+|---|---|---|---|---|
+| **30 conns / 32 workers (kept)** | **3551** | **~7.3 ms** | **~25 ms** | — |
+| 30 conns / 60 workers | 3655 | 15.0 ms | 34.3 ms | 1 of 5 runs |
+| 40 conns / 80 workers | 3638 | 19.0 ms | 51.3 ms | 1 of 5 runs |
+| 50 conns / 100 workers | 3684 | 23.0 ms | 73.5 ms | 1 of 5 runs |
+| 60 conns / 120 workers | 4277 | 23.0 ms | 82.5 ms | 3 of 5 runs |
+| 70 conns / 140 workers | 3798 | 29.1 ms | 123.5 ms | 0 of 5 runs |
+
+Pushing pool size and workers up buys an unreliable 2 to 20% more throughput (not even
+monotonic — 70 connections is worse than 60) for a reliable 2 to 5× worse p50/p99, in
+every single configuration tried, not just the ones that happened to cross 4000. That is
+the signature of being near a saturation point: more concurrency moves waiting from the
+client's queue into the server's, it does not create capacity.
+
+**Decided: keep `WALLET_DB_MAX_CONNS` at 30**, the project's existing default. The
+round-trip reduction's real, unconditional win is the baseline row — lower p99 *and*
+higher throughput than the pre-optimization 3427 req/s / ~74 ms of section 7, with no
+trade-off attached. Chasing 4000+ by adding connections was tried and declined: it is not
+a free improvement, it is a different, worse point on the same latency/throughput curve,
+and this project picks the lower-latency point. "Passing 3500" stands as the result of
+this section; "passing 4000" does not, by choice.
+
 ## Still open
 
+- **Apply the same round-trip reduction to `serializable`** (section 9 only touched
+  `locking`) and remeasure sections 6/7's comparison under both optimized.
 - **More repetitions of the 20 to 50 connection blocks**, to separate the values inside the
   plateau, which the current spread cannot tell apart (16 to 30% within each block).
 - ~~Confirm the real connection count during a run with `pg_stat_activity`.~~ Done in
