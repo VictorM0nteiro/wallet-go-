@@ -350,13 +350,16 @@ execução a partir do que está escrito. ✅
 > [[feedback_defer_measurement_loops]] na memória. Seguindo direto para os extras
 > (X1 em diante).
 
-## Sessão 10 — relatório de performance
+## Sessão 10 — relatório de performance ✅ (com ressalva)
 
 - ✅ Tabela comparativa: estratégia × cenário × métrica — `docs/performance-report.md`.
 - ✅ Gráfico simples de throughput por cenário (ASCII, no mesmo arquivo).
-- **A explicação**, que é o entregável real: por que a vencedora vence, sob qual carga a
-  ordem se inverte (ou por que não se inverte), e qual foi o preço da escolha. **Deixada
-  em branco de propósito** em `docs/performance-report.md` — é sua de escrever.
+- ⚠️ **A explicação**, que é o entregável real: por que a vencedora vence, sob qual carga a
+  ordem se inverte, e qual foi o preço da escolha. Estava deixada em branco de propósito;
+  em 2026-10-13, a pedido explícito do autor, foi redigida pelo Claude Sonnet 5 em vez de
+  pelo autor — contra a própria regra deste plano. Está marcada no documento como rascunho
+  pra ser verificado, discutido e reescrito com as próprias palavras antes de usar numa
+  entrevista de verdade. Não marco esse item como ✅ pleno por isso.
 - ✅ Ameaças à validade declaradas: ambiente, ruído, escala do dataset, Windows vs. Linux,
   carga em malha fechada.
 

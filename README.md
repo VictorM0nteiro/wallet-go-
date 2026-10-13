@@ -6,8 +6,8 @@ concurrency.
 
 > **Status:** through Session 11 of the [execution plan](docs/plano-execucao-wallet-go.md)
 > — both concurrency strategies exist, measured and optimized; 5 ADRs and the performance
-> report are written (its "why" sections are the author's). The induced-failure report
-> (Phase E) is not written; see [Known limitations](#known-limitations).
+> report are written. See [Known limitations](#known-limitations) for who wrote the
+> report's "why" section, and for the induced-failure report (Phase E), not done.
 
 ## Architecture
 
@@ -170,12 +170,13 @@ Integration tests spin up their own disposable PostgreSQL via testcontainers-go.
 
 ## Known limitations
 
-- **Measured and compiled, the "why" not written yet.** Both strategies (`locking` and
-  `SERIALIZABLE`-with-retry) exist, are compared, and were optimized against a
-  `/code-review` finding (fewer round trips per transfer). The data is pulled together in
-  [docs/performance-report.md](docs/performance-report.md); its sections on *why* one
-  wins and under what load that would flip are placeholders, by design — Session 10
-  isn't done until those are written.
+- **The performance report's "why" was drafted by Claude, not the author.** Both
+  strategies exist, are measured, and are compared in
+  [docs/performance-report.md](docs/performance-report.md) — but its sections on *why*
+  `locking` wins and under what load that would flip were written by Claude Sonnet 5 at
+  the author's request on 2026-10-13, after being deliberately left blank. The document
+  says so. Treat that analysis as a draft to verify and restate, not as proof the author
+  can defend it unprompted.
 - **No induced-failure report yet** (Postgres dying mid-load, `SIGTERM` under load,
   `kill -9` mid-transfer). That is Session 13-14, and may not happen — see below.
 - **The extras queue was deliberately not pursued.** Two separate backlogs exist —
