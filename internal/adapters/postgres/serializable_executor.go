@@ -86,55 +86,64 @@ type serializableTx struct {
 	lockingTx
 }
 
+// Execute reads both account kinds and the source balance in one pipelined
+// batch (one round trip), then inserts the transfer and its two entries in
+// a second batch. Same reasoning as the locking strategy's Execute: no
+// explicit lock order to preserve here (SERIALIZABLE has no FOR UPDATE), so
+// batching is lower-risk than it was there — conflicts are caught by
+// Postgres's read/write tracking at commit time, not by statement order.
 func (s *serializableTx) Execute(ctx context.Context, req app.TransferRequest) error {
+	readBatch := &pgx.Batch{}
+	readBatch.Queue(`SELECT kind FROM accounts WHERE id = $1`, req.FromAccountID)
+	readBatch.Queue(`SELECT kind FROM accounts WHERE id = $1`, req.ToAccountID)
+	const sumQuery = `SELECT COALESCE(SUM(amount_cents), 0) FROM entries WHERE account_id = $1`
+	readBatch.Queue(sumQuery, req.FromAccountID)
+
+	readResults := s.tx.SendBatch(ctx, readBatch)
 	kinds := make(map[uuid.UUID]domain.AccountKind, 2)
 	for _, id := range []uuid.UUID{req.FromAccountID, req.ToAccountID} {
-		kind, err := readAccountKind(ctx, s.tx, id)
-		if err != nil {
-			return err
+		var kind string
+		if err := readResults.QueryRow().Scan(&kind); err != nil {
+			_ = readResults.Close()
+			if errors.Is(err, pgx.ErrNoRows) {
+				return domain.ErrAccountNotFound
+			}
+			return fmt.Errorf("postgres: read account: %w", err)
 		}
-		kinds[id] = kind
+		kinds[id] = domain.AccountKind(kind)
 	}
-
 	var balance int64
-	const sumQuery = `SELECT COALESCE(SUM(amount_cents), 0) FROM entries WHERE account_id = $1`
-	if err := s.tx.QueryRow(ctx, sumQuery, req.FromAccountID).Scan(&balance); err != nil {
+	if err := readResults.QueryRow().Scan(&balance); err != nil {
+		_ = readResults.Close()
 		return fmt.Errorf("postgres: read source balance: %w", err)
+	}
+	// Must close before this connection can start the next batch.
+	if err := readResults.Close(); err != nil {
+		return fmt.Errorf("postgres: read batch: %w", err)
 	}
 
 	if err := domain.CanDebit(domain.NewMoney(balance), req.Amount, kinds[req.FromAccountID]); err != nil {
 		return err
 	}
 
-	return insertMovement(ctx, s.tx, req)
-}
-
-func readAccountKind(ctx context.Context, tx pgx.Tx, id uuid.UUID) (domain.AccountKind, error) {
-	var kind string
-	err := tx.QueryRow(ctx, `SELECT kind FROM accounts WHERE id = $1`, id).Scan(&kind)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return "", domain.ErrAccountNotFound
-		}
-		return "", fmt.Errorf("postgres: read account: %w", err)
-	}
-	return domain.AccountKind(kind), nil
-}
-
-func insertMovement(ctx context.Context, tx pgx.Tx, req app.TransferRequest) error {
-	const insertTransfer = `
+	insertBatch := &pgx.Batch{}
+	insertBatch.Queue(`
               INSERT INTO transfers (id, from_account_id, to_account_id, amount_cents, status)
               VALUES ($1, $2, $3, $4, 'completed')
-      `
-	if _, err := tx.Exec(ctx, insertTransfer, req.ID, req.FromAccountID, req.ToAccountID, req.Amount.Cents()); err != nil {
+      `, req.ID, req.FromAccountID, req.ToAccountID, req.Amount.Cents())
+	const insertEntry = `INSERT INTO entries (transfer_id, account_id, amount_cents) VALUES ($1, $2, $3)`
+	insertBatch.Queue(insertEntry, req.ID, req.FromAccountID, -req.Amount.Cents())
+	insertBatch.Queue(insertEntry, req.ID, req.ToAccountID, req.Amount.Cents())
+
+	insertResults := s.tx.SendBatch(ctx, insertBatch)
+	defer func() { _ = insertResults.Close() }()
+	if _, err := insertResults.Exec(); err != nil {
 		return fmt.Errorf("postgres: insert transfer: %w", err)
 	}
-
-	const insertEntry = `INSERT INTO entries (transfer_id, account_id, amount_cents) VALUES ($1, $2, $3)`
-	if _, err := tx.Exec(ctx, insertEntry, req.ID, req.FromAccountID, -req.Amount.Cents()); err != nil {
+	if _, err := insertResults.Exec(); err != nil {
 		return fmt.Errorf("postgres: insert debit entry: %w", err)
 	}
-	if _, err := tx.Exec(ctx, insertEntry, req.ID, req.ToAccountID, req.Amount.Cents()); err != nil {
+	if _, err := insertResults.Exec(); err != nil {
 		return fmt.Errorf("postgres: insert credit entry: %w", err)
 	}
 	return nil

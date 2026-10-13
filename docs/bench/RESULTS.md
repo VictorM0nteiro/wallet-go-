@@ -479,20 +479,96 @@ a free improvement, it is a different, worse point on the same latency/throughpu
 and this project picks the lower-latency point. "Passing 3500" stands as the result of
 this section; "passing 4000" does not, by choice.
 
+### Applying the same reduction to `serializable`
+
+The same batching went into `serializableTx.Execute`: the two account reads plus the
+balance read into one pipelined round trip, the three inserts into a second. Lower risk
+than the `locking` change — `SERIALIZABLE` has no explicit lock order to preserve, no
+`FOR UPDATE`, so there is no deadlock-avoidance guarantee that pipelining could threaten.
+Postgres's own read/write conflict tracking at commit time is what catches contention
+here, and that is unaffected by whether the client waited between statements.
+
+Remeasured with the same commands as sections 6/7 (seed 42, 30 connections, 5 runs each),
+against the stock Postgres config from section 6, not the tuned one — this comparison is
+against section 6's numbers, not section 7's:
+
+| Scenario | Metric | Before (section 6) | After |
+|---|---|---|---|
+| `hot` | peak req/s (median) | 341 | **397** |
+| `hot` | retries per run | 10 200 to 22 100 | 23 955 to 24 749 |
+| `spread` | peak req/s (median) | 741 | **1160** |
+| `spread` | retries per run | 66 400 to 69 600 | 15 300 to 23 600 |
+
+Both scenarios improved, `spread` by a lot (741 → 1160, +57% at the median). All non-2xx
+responses were `409 concurrent_conflict` (the fix from the earlier session), zero `500`,
+and ledger consistency passed in all 10 runs.
+
+**The retries moved in opposite directions, and both make sense.** On `hot` (two fixed
+accounts, maximum contention), retries went *up* slightly: each attempt now finishes
+faster, so more attempts fit in the same wall-clock time, median conflict or not. On
+`spread` (100 accounts, originally thought to be low-contention), retries *fell* by about
+two thirds: a shorter round trip between the read and the write of the same row means a
+smaller window for another transaction to interleave and trigger a serialization
+failure. The `spread` number is the more telling one — it says the original 66-70k
+retries measured in section 6 were not inherent to `spread`'s contention level, they were
+inflated by how long each attempt kept its snapshot open.
+
+### Testing the `synchronous_commit` hypothesis on the `hot` plateau
+
+The concurrency discussion before section 7 raised a hypothesis: the `hot` scenario's
+plateau (~300-400 req/s regardless of pool size) might be bound by `fsync` — the wait for
+the WAL to hit disk on every commit — rather than purely by the row lock. `locking`,
+`hot`, fixed 32 workers, seed 42, 30 connections, 3 runs each side. Toggled live with
+`ALTER SYSTEM SET synchronous_commit = off` + `pg_reload_conf()` (no restart needed —
+`synchronous_commit` is a per-session parameter), reverted immediately after:
+
+| `synchronous_commit` | req/s (3 runs) | p50 | p99 |
+|---|---|---|---|
+| `on` (default) | 342, 482, 497 | 63-91 ms | 92-118 ms |
+| `off` | 622, 661, 678 | 47-50 ms | 79-85 ms |
+
+**Confirmed.** Turning off the durability wait roughly doubled throughput and cut
+latency by a third, with no code change at all — the clearest evidence yet that `fsync`,
+not the row lock by itself, is most of the `hot` plateau. The row lock still serializes
+every transfer on the account, but each one finishes faster without waiting for the WAL
+flush, so more of them fit per second.
+
+This is not a configuration change for this project: `synchronous_commit = off` means a
+commit can be acknowledged to the client before it is durable on disk, so a crash (not a
+clean shutdown — an actual crash) in the wrong instant can lose the last fraction of a
+second of "confirmed" transfers. That directly contradicts the ledger's central claim.
+The parameter was reverted to `on` right after this measurement and is not set anywhere
+in `docker-compose.yml`.
+
+### Checking the `accessLog` finding
+
+The same code review flagged `accessLog`'s synchronous, unbuffered write to `stdout` on
+every request's own goroutine as a speculative cost, cheap to check with an A/B. Removed
+it from the middleware chain, rebuilt, ran `spread`/`locking` (30 connections, 32 workers,
+seed 42, 3 runs), reverted immediately after:
+
+| `accessLog` | req/s (3 runs) | p99 |
+|---|---|---|
+| on (normal) | 3551 median (section 9 above) | ~25 ms |
+| off | 4053, 3775, 3588 (median 3775) | ~24 ms |
+
+**Real, but not the main story.** About +6% throughput with `accessLog` removed, and no
+meaningful change to tail latency — consistent with a fixed per-request cost (one
+`slog` JSON encode and one blocking `stdout` write) rather than something that compounds
+under load the way the round trips or `fsync` did. Not worth cutting correlated request
+logging for 6%; noted here as measured and closed, not pursued further.
+
 ## Still open
 
-- **Apply the same round-trip reduction to `serializable`** (section 9 only touched
-  `locking`) and remeasure sections 6/7's comparison under both optimized.
+- **Remeasure `serializable` under the tuned Postgres config** (section 9's `serializable`
+  numbers are against section 6's stock config, for a direct before/after; section 7's
+  tuned-config comparison hasn't been redone with the optimized executor).
 - **More repetitions of the 20 to 50 connection blocks**, to separate the values inside the
   plateau, which the current spread cannot tell apart (16 to 30% within each block).
 - ~~Confirm the real connection count during a run with `pg_stat_activity`.~~ Done in
   sections 6 and 7: a sample was taken mid-run in every one of the 45 matrix runs. The
   locking samples land close to the declared pool size (for example 30 or 31 sessions at
   `-api-max-conns 30`, the extra one being the sampler's own connection).
-- **Test the `synchronous_commit = off` hypothesis for the `hot` plateau** (see the
-  concurrency discussion before section 7). Not run yet: it trades away a durability
-  guarantee, so it should stay a disposable, undocumented-as-config experiment, not
-  something committed to `docker-compose.yml`.
 - **Repeat `pgbench`** under the same conditions as the API, to get a valid reference.
 - **Repeat the `read` scenario** with the current database, since it has grown a lot.
 - **Explain the connection failures** that appeared at 512 workers in the preliminary
