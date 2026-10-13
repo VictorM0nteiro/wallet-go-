@@ -341,32 +341,63 @@ execução a partir do que está escrito. ✅
 
 # FASE D — documentação (sessões 10-12)
 
+> **Adiada em 2026-10-13.** Depois de várias sessões seguidas quase só de medição
+> (curva de pool, matriz de estratégias, a otimização de round trips via
+> `/code-review`, os experimentos de `synchronous_commit` e `accessLog`), a decisão
+> foi parar de perseguir cada ponta solta de medição na hora e voltar pra trabalho
+> de feature/arquitetura. A Sessão 10 (o relatório) e a lista "Still open" do
+> `docs/bench/RESULTS.md` ficam para um lote único, mais pra frente — ver
+> [[feedback_defer_measurement_loops]] na memória. Seguindo direto para os extras
+> (X1 em diante).
+
 ## Sessão 10 — relatório de performance
 
-- Tabela comparativa: estratégia × cenário × métrica
-- Gráfico simples de throughput e p99 por cenário
+- ✅ Tabela comparativa: estratégia × cenário × métrica — `docs/performance-report.md`.
+- ✅ Gráfico simples de throughput por cenário (ASCII, no mesmo arquivo).
 - **A explicação**, que é o entregável real: por que a vencedora vence, sob qual carga a
-  ordem se inverte (ou por que não se inverte), e qual foi o preço da escolha
-- Ameaças à validade declaradas: ambiente, ruído, escala do dataset
+  ordem se inverte (ou por que não se inverte), e qual foi o preço da escolha. **Deixada
+  em branco de propósito** em `docs/performance-report.md` — é sua de escrever.
+- ✅ Ameaças à validade declaradas: ambiente, ruído, escala do dataset, Windows vs. Linux,
+  carga em malha fechada.
 
 **Armadilha:** apresentar número absoluto como throughput de produção. Você mediu
 comparação relativa em ambiente controlado — diga exatamente isso.
 
-## Sessão 11 — ADRs
+## Sessão 11 — ADRs ✅
 
 Os cinco do escopo, em `docs/adr/`, formato curto: contexto, opções consideradas, decisão,
-consequências. Cada um em menos de uma página.
+consequências.
 
-O ADR 4 (estratégia de concorrência) cita o relatório. O ADR 1 (saldo derivado) declara o
-custo e aponta o snapshot como mitigação futura.
+- `0001-balance-derived-from-ledger.md`
+- `0002-money-as-int64-cents.md`
+- `0003-idempotency-scoped-with-fingerprint.md`
+- `0004-concurrency-strategy-chosen-by-measurement.md` — cita `docs/performance-report.md`
+  em vez de repetir o "porquê"; esse continua seu de escrever lá.
+- `0005-no-external-currency-conversion.md` — reescrito como decisão de **não** construir
+  (escolha de 2026-10-13, ver abaixo), não como se o mecanismo existisse.
 
-## Sessão 12 — README final
+Linkados em `README.md` § Design decisions.
 
-Os oito itens da seção 10 do escopo. Diagrama simples de arquitetura. Seção de limitações
-conhecidas escrita com cuidado — é o item que mais pesa.
+## Sessão 12 — README final ✅ (7 dos 8 itens)
+
+Os oito itens da seção 10 do escopo:
+
+1. ✅ Uma frase.
+2. ✅ Diagrama simples de arquitetura (ASCII, request → use case → os dois executores →
+   Postgres).
+3. ✅ O modelo do ledger, com exemplo.
+4. ✅ Decisões de design, linkadas aos 5 ADRs.
+5. ✅ Resultados de medição — linka `docs/performance-report.md` (tabela e metodologia) e
+   `docs/bench/RESULTS.md` (log bruto).
+6. ❌ Relatório de falha induzida — não existe, Fase E não começou. Fica registrado como
+   limitação conhecida, não escondido.
+7. ✅ Como rodar.
+8. ✅ Limitações conhecidas, escrita com cuidado, incluindo a decisão de não perseguir os
+   extras.
 
 **Pronto quando:** alguém que nunca viu o projeto entende, em cinco minutos de leitura, o
-que ele faz, por que as decisões foram tomadas e o que ele não resolve.
+que ele faz, por que as decisões foram tomadas e o que ele não resolve. O item 6 falta de
+propósito — a Fase E decide se ele entra.
 
 ---
 
