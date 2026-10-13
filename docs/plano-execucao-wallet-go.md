@@ -392,33 +392,44 @@ Os oito itens da seção 10 do escopo:
 4. ✅ Decisões de design, linkadas aos 5 ADRs.
 5. ✅ Resultados de medição — linka `docs/performance-report.md` (tabela e metodologia) e
    `docs/bench/RESULTS.md` (log bruto).
-6. ❌ Relatório de falha induzida — não existe, Fase E não começou. Fica registrado como
-   limitação conhecida, não escondido.
+6. ✅ Relatório de falha induzida — `docs/resilience-report.md`, 4 de 6 roteiros (ver
+   Fase E abaixo). Linkado no README.
 7. ✅ Como rodar.
 8. ✅ Limitações conhecidas, escrita com cuidado, incluindo a decisão de não perseguir os
    extras.
 
 **Pronto quando:** alguém que nunca viu o projeto entende, em cinco minutos de leitura, o
-que ele faz, por que as decisões foram tomadas e o que ele não resolve. O item 6 falta de
-propósito — a Fase E decide se ele entra.
+que ele faz, por que as decisões foram tomadas e o que ele não resolve. ✅ — todos os 8
+itens.
 
 ---
 
-# FASE E — falha induzida (sessões 13-14)
+# FASE E — falha induzida (sessões 13-14) ✅ (4 de 6 roteiros)
 
-## Sessão 13 — roteiros 1 a 3
+## Sessão 13 — roteiros 1 a 3 ✅
 
-Postgres cai, Postgres volta, SIGTERM sob carga. Hipótese escrita **antes** de cada um.
+Postgres cai, Postgres volta, SIGTERM sob carga. Hipótese escrita **antes** de cada um —
+`docs/resilience-report.md`.
 
-Reserve metade da sessão para consertar o que o roteiro 3 quebrar. Ele quase sempre quebra.
+Reserve metade da sessão para consertar o que o roteiro 3 quebrar. Ele quase sempre
+quebra — quebrou aqui também, mas no script do teste (sequência errada: o app ficou
+fora do ar durante toda a janela de 60s em que o `loadtest` esperava ele voltar), não na
+aplicação. Documentado como a divergência real deste roteiro.
 
-## Sessão 14 — roteiros 4 a 6 e relatório
+## Sessão 14 — roteiro 5 ✅, roteiros 4 e 6 não feitos
 
-Latência artificial, `kill -9` no meio de uma transferência, dependência externa fora (se
-o extra 2 existir).
+- ✅ Roteiro 5, `kill -9` no meio de uma transferência — `docs/resilience-report.md`,
+  com evidência no nível de cada `idempotency_key`, não só no saldo final.
+- ❌ Roteiro 4, latência artificial — sem ferramenta pra isso no projeto (`tc netem` não
+  funciona igual no Docker Desktop/Windows; um proxy como `toxiproxy` seria uma
+  dependência nova). Adiado.
+- Roteiro 6, dependência externa fora — não se aplica, condicionado ao extra 2 (cotação
+  externa), que o ADR 5 registra como decidido não construir.
 
-`docs/resilience-report.md` com a coluna "o que de fato aconteceu". **Hipóteses erradas
-ficam no texto.** A divergência é o produto.
+`docs/resilience-report.md` com a coluna "o que de fato aconteceu" por roteiro, mais um
+resumo e uma seção "Still open". **Hipóteses erradas ficam no texto.** A divergência é o
+produto — e a divergência real encontrada (seção acima) foi no script do roteiro 3, não
+na aplicação, o que também é um achado legítimo sobre testar resiliência.
 
 ---
 

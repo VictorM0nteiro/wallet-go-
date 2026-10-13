@@ -4,10 +4,11 @@ A digital wallet API where the balance is never a stored column — it is derive
 append-only ledger, and transfers between accounts are idempotent and correct under
 concurrency.
 
-> **Status:** through Session 11 of the [execution plan](docs/plano-execucao-wallet-go.md)
-> — both concurrency strategies exist, measured and optimized; 5 ADRs and the performance
-> report are written. See [Known limitations](#known-limitations) for who wrote the
-> report's "why" section, and for the induced-failure report (Phase E), not done.
+> **Status:** through Session 14 of the [execution plan](docs/plano-execucao-wallet-go.md)
+> — both concurrency strategies exist, measured and optimized; 5 ADRs, the performance
+> report, and 4 of 6 induced-failure scenarios are written. See
+> [Known limitations](#known-limitations) for who wrote the performance report's "why"
+> section and which failure scenarios are missing.
 
 ## Architecture
 
@@ -177,8 +178,12 @@ Integration tests spin up their own disposable PostgreSQL via testcontainers-go.
   the author's request on 2026-10-13, after being deliberately left blank. The document
   says so. Treat that analysis as a draft to verify and restate, not as proof the author
   can defend it unprompted.
-- **No induced-failure report yet** (Postgres dying mid-load, `SIGTERM` under load,
-  `kill -9` mid-transfer). That is Session 13-14, and may not happen — see below.
+- **Induced-failure report covers 4 of 6 scenarios.** Postgres dying mid-load and coming
+  back, `SIGTERM` under load, and `kill -9` mid-transfer are all run and documented in
+  [docs/resilience-report.md](docs/resilience-report.md), with the hypothesis written
+  before each one. Artificial latency injection (no tool set up for it) and an external
+  dependency going down (conditional on the currency-conversion extra, not built — see
+  [ADR 5](docs/adr/0005-no-external-currency-conversion.md)) are not attempted.
 - **The extras queue was deliberately not pursued.** Two separate backlogs exist —
   [docs/escopo-carteira-go.md](docs/escopo-carteira-go.md) §11 (balance snapshot, currency
   conversion with resilience patterns, a third concurrency strategy, Terraform/Caddy
@@ -188,7 +193,7 @@ Integration tests spin up their own disposable PostgreSQL via testcontainers-go.
   patterns, not required by this project's own thesis (§1 of the scope doc). X8 (least
   privilege: a restricted DB role, a hardened container) was the one exception worth
   doing, since it strengthens that thesis directly. The rest stays a backlog, not a gap:
-  the project is considered complete with Sessions 1-11, and stopping scope on purpose is
+  the project is considered complete with Sessions 1-14, and stopping scope on purpose is
   itself part of the answer to "why did you stop here."
 - **Account creation is not idempotency-key gated.** It relies on the
   `UNIQUE(owner_id, kind, currency)` constraint instead (`409` on repeat), which is a
