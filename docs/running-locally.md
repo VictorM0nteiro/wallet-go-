@@ -29,6 +29,8 @@ cp .env.example .env
 | `WALLET_TRANSFER_STRATEGY` | no | `locking` | Concurrency strategy for transfers: `locking` or `serializable`. See [concurrency-strategies.md](concurrency-strategies.md). |
 | `WALLET_RATE_LIMIT_RPS` | no | `50` | Per-API-key token bucket, requests/second. `0` disables rate limiting entirely. See [ADR 6](adr/0006-rate-limiting-per-api-key.md). |
 | `WALLET_RATE_LIMIT_BURST` | no | `100` | Token bucket capacity. Must be positive while `WALLET_RATE_LIMIT_RPS` is nonzero. |
+| `RELAY_POLL_INTERVAL` | no | `1s` | How often `cmd/relay` polls the outbox for pending events. Only read by `cmd/relay`, not `cmd/wallet`. See [ADR 7](adr/0007-outbox-relay-no-broker.md). |
+| `RELAY_BATCH_SIZE` | no | `20` | Max events `cmd/relay` processes per poll. Only read by `cmd/relay`. |
 
 The `.env` file is git-ignored. Always run the app from the repository root,
 because that is where `.env` is looked up.
@@ -73,6 +75,31 @@ You should see a log line like:
 The process stays in the foreground. Leave this terminal open and use a second
 one for the next step. On startup the app creates the single `system` account
 if it does not exist yet (it is the counterparty of deposits and withdrawals).
+
+### Run the relay (optional)
+
+Every completed transfer (so every deposit and withdrawal too) is recorded in a
+transactional outbox. A separate process, `cmd/relay`, polls for pending events and
+delivers them at least once — see [ADR 7](adr/0007-outbox-relay-no-broker.md). It is
+optional: nothing in `cmd/wallet` depends on it, and the outbox just accumulates
+unpublished rows until a relay is running.
+
+It connects as `wallet_relay`, a different role from `cmd/wallet`'s `wallet_app`, with
+no grant at all outside the `outbox` table (migration `000003`). `.env`'s
+`DATABASE_URL` is `wallet_app`'s, so override it for the relay specifically:
+
+```bash
+DATABASE_URL=postgres://wallet_relay:wallet_relay_dev@localhost:5432/wallet?sslmode=disable \
+  go run ./cmd/relay
+```
+
+If you are running against the `docker compose` database rather than a fresh one,
+create the role once (`deploy/postgres/init/02-relay-role.sql` only runs on a
+brand-new volume): `docker compose exec postgres psql -U wallet -d wallet -c "CREATE
+ROLE wallet_relay LOGIN PASSWORD 'wallet_relay_dev';"`. `WALLET_RATE_LIMIT_RPS`/
+`WALLET_RATE_LIMIT_BURST` do not apply to it; `cmd/relay` has no HTTP server. Or run
+it via Docker instead, where the role and the connection string are already wired up:
+`docker compose up relay`.
 
 ## 5. Try the API
 

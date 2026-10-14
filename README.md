@@ -4,10 +4,11 @@ A digital wallet API where the balance is never a stored column — it is derive
 append-only ledger, and transfers between accounts are idempotent and correct under
 concurrency.
 
-> **Status:** through Session 14 of the [execution plan](docs/plano-execucao-wallet-go.md)
-> — both concurrency strategies exist, measured and optimized; 5 ADRs, the performance
-> report, and 4 of 6 induced-failure scenarios are written. See
-> [Known limitations](#known-limitations) for which failure scenarios are missing.
+> **Status:** through Session 14 of the [execution plan](docs/plano-execucao-wallet-go.md),
+> plus X5 and X8 from its extras backlog — both concurrency strategies exist, measured and
+> optimized; 7 ADRs, the performance report, and 4 of 6 induced-failure scenarios are
+> written. See [Known limitations](#known-limitations) for which failure scenarios are
+> missing.
 
 ## Architecture
 
@@ -55,8 +56,9 @@ internal/
   adapters/
     http/              chi router, DTOs, domain-error -> HTTP-status translation
     postgres/          repositories + the two transfer-port implementations
-                        (locking, serializable)
+                        (locking, serializable) + the outbox/relay (ADR 7)
 cmd/loadtest/           standalone load generator, see docs/loadtest.md
+cmd/relay/              polls the outbox, delivers events at least once (ADR 7)
 ```
 
 Full rationale and the locked-in decisions live in
@@ -151,6 +153,9 @@ linked ADR:
 - **Rate limiting is per API key, not per IP or global.** A token bucket (50 req/s,
   burst 100 by default) reuses the identity the project already has, on by default.
   [ADR 6](docs/adr/0006-rate-limiting-per-api-key.md)
+- **Every completed transfer (so every deposit and withdrawal too) is recorded in a
+  transactional outbox**, delivered at least once by a separate polling process
+  (`cmd/relay`), no message broker. [ADR 7](docs/adr/0007-outbox-relay-no-broker.md)
 
 ## Load testing
 
@@ -179,17 +184,28 @@ Integration tests spin up their own disposable PostgreSQL via testcontainers-go.
   before each one. Artificial latency injection (no tool set up for it) and an external
   dependency going down (conditional on the currency-conversion extra, not built — see
   [ADR 5](docs/adr/0005-no-external-currency-conversion.md)) are not attempted.
-- **The extras queue was deliberately not pursued.** Two separate backlogs exist —
-  [docs/escopo-carteira-go.md](docs/escopo-carteira-go.md) §11 (balance snapshot, currency
-  conversion with resilience patterns, a third concurrency strategy, Terraform/Caddy
-  deploy, outbox) and `docs/plano-execucao-wallet-go.md`'s X1-X7 (reversal, stable failure
-  codes, three instances, reconciliation, outbox, an external reference key, Uber Fx) —
+- **The extras queue was deliberately not pursued, except X5 and X8.** Two separate
+  backlogs exist — [docs/escopo-carteira-go.md](docs/escopo-carteira-go.md) §11 (balance
+  snapshot, currency conversion with resilience patterns, a third concurrency strategy,
+  Terraform/Caddy deploy) and `docs/plano-execucao-wallet-go.md`'s X1-X7 (reversal, stable
+  failure codes, three instances, reconciliation, an external reference key, Uber Fx) —
   mined mostly from a *different* job's take-home challenge to practice unrelated
   patterns, not required by this project's own thesis (§1 of the scope doc). X8 (least
-  privilege: a restricted DB role, a hardened container) was the one exception worth
-  doing, since it strengthens that thesis directly. The rest stays a backlog, not a gap:
-  the project is considered complete with Sessions 1-14, and stopping scope on purpose is
-  itself part of the answer to "why did you stop here."
+  privilege: a restricted DB role, a hardened container) and X5 (the transactional outbox,
+  [ADR 7](docs/adr/0007-outbox-relay-no-broker.md)) were the two exceptions worth doing,
+  since both strengthen that thesis directly — and X5, specifically, was built *without*
+  the message broker and balance-projector extension a later proposal suggested adding on
+  top of it, because that would have contradicted "sem broker" above. The rest stays a
+  backlog, not a gap: the project is considered complete with Sessions 1-14 plus those two
+  extras, and stopping scope on purpose is itself part of the answer to "why did you stop
+  here."
+- **The outbox grows forever; nothing deletes published rows.** Accepted and unmeasured
+  for this pass, the same kind of call as the `SUM(entries)` balance cost (ADR 1). See
+  [ADR 7](docs/adr/0007-outbox-relay-no-broker.md).
+- **The relay's `Publisher` delivers nothing real.** `LogPublisher` just logs — it exists
+  to prove the outbox+relay mechanism, not as a production integration. Anything that
+  actually consumes these events still needs to be written, and would need to be
+  idempotent by `event_id` itself, since delivery is at-least-once.
 - **Account creation is not idempotency-key gated.** It relies on the
   `UNIQUE(owner_id, kind, currency)` constraint instead (`409` on repeat), which is a
   narrower guarantee than the `Idempotency-Key` contract used by money-moving endpoints.

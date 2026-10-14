@@ -49,6 +49,21 @@ func (s *TransferService) Transfer(ctx context.Context, cmd TransferCommand) (Tr
 			return err
 		}
 
+		eventBody, err := json.Marshal(struct {
+			TransferID    uuid.UUID `json:"transfer_id"`
+			FromAccountID uuid.UUID `json:"from_account_id"`
+			ToAccountID   uuid.UUID `json:"to_account_id"`
+			AmountCents   int64     `json:"amount_cents"`
+		}{req.ID, req.FromAccountID, req.ToAccountID, req.Amount.Cents()})
+		if err != nil {
+			return fmt.Errorf("app: encode event payload: %w", err)
+		}
+		// Only on the newly-claimed path: a replay must never append a
+		// second event for the same transfer.
+		if err := tx.AppendEvent(ctx, "transfer.completed", eventBody); err != nil {
+			return err
+		}
+
 		body, err := json.Marshal(struct {
 			TransferID uuid.UUID `json:"transfer_id"`
 		}{req.ID})

@@ -46,7 +46,9 @@ services:
     restart: "no"
 
   app:
-    build: .
+    build:
+      context: .
+      target: wallet
     restart: on-failure
     # Least privilege at the container level (X8). Scoped to app, the image
     # this project actually builds: postgres and migrate are third-party
@@ -80,6 +82,29 @@ services:
       LISTEN_ADDR: :8080
     ports:
       - "127.0.0.1:8080:8080"
+
+  relay:
+    build:
+      context: .
+      target: relay
+    restart: on-failure
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      RELAY_POLL_INTERVAL: ${RELAY_POLL_INTERVAL:-1s}
+      RELAY_BATCH_SIZE: ${RELAY_BATCH_SIZE:-20}
+      # wallet_relay is migration 000003's least-privilege role: it can only
+      # ever read and mark rows in outbox, never touch accounts/transfers/
+      # entries/idempotency_keys, no matter how many instances ever run.
+      DATABASE_URL: postgres://wallet_relay:wallet_relay_dev@postgres:5432/wallet?sslmode=disable
 
 volumes:
   wallet_pgdata:

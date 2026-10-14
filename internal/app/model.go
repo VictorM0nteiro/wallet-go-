@@ -53,6 +53,11 @@ type TransferTx interface {
 	// the adapter's strategy, invisible to the use case.
 	Execute(ctx context.Context, req TransferRequest) error
 	CompleteKey(ctx context.Context, key IdempotencyKey, transferID uuid.UUID, resp StoredResponse) error
+	// AppendEvent records a domain event in the same transaction as the
+	// transfer it describes (X5, docs/adr/0007-outbox-relay-no-broker.md).
+	// A relay delivers it at least once by polling; the event's identity is
+	// generated once, inside this call, and never regenerated on retry.
+	AppendEvent(ctx context.Context, eventType string, payload []byte) error
 }
 
 // TransferExecutor is the transfer port: run fn atomically in a transaction.

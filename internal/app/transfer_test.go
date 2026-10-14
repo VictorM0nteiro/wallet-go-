@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"maps"
 	"testing"
@@ -16,7 +17,13 @@ import (
 type fakeExecutor struct {
 	keys     map[IdempotencyKey]StoredKey
 	executed []TransferRequest
+	appended []appendedEvent
 	execErr  error
+}
+
+type appendedEvent struct {
+	Type    string
+	Payload []byte
 }
 
 func newFakeExecutor() *fakeExecutor {
@@ -26,9 +33,11 @@ func newFakeExecutor() *fakeExecutor {
 func (f *fakeExecutor) InTx(ctx context.Context, fn func(context.Context, TransferTx) error) error {
 	keysBefore := maps.Clone(f.keys)
 	executedBefore := len(f.executed)
+	appendedBefore := len(f.appended)
 	if err := fn(ctx, f); err != nil {
 		f.keys = keysBefore
 		f.executed = f.executed[:executedBefore]
+		f.appended = f.appended[:appendedBefore]
 		return err
 	}
 	return nil
@@ -51,6 +60,11 @@ func (f *fakeExecutor) Execute(_ context.Context, req TransferRequest) error {
 		return f.execErr
 	}
 	f.executed = append(f.executed, req)
+	return nil
+}
+
+func (f *fakeExecutor) AppendEvent(_ context.Context, eventType string, payload []byte) error {
+	f.appended = append(f.appended, appendedEvent{Type: eventType, Payload: payload})
 	return nil
 }
 
@@ -94,6 +108,39 @@ func TestTransferService_NewKeyExecutesAndStoresResponse(t *testing.T) {
 	if exec.keys[cmd.Key].State != KeyStateCompleted {
 		t.Errorf("key state = %q, want completed", exec.keys[cmd.Key].State)
 	}
+	if len(exec.appended) != 1 || exec.appended[0].Type != "transfer.completed" {
+		t.Fatalf("appended = %v, want exactly one transfer.completed event", exec.appended)
+	}
+}
+
+// TestTransferService_SuccessfulTransferAppendsExactlyOneEvent is the X5
+// property in isolation: the event is appended in the same InTx call as
+// the transfer, with a payload a relay could actually use.
+func TestTransferService_SuccessfulTransferAppendsExactlyOneEvent(t *testing.T) {
+	exec := newFakeExecutor()
+	svc := NewTransferService(exec)
+	cmd := newCommand("fp-a", 5000)
+
+	res, err := svc.Transfer(context.Background(), cmd)
+	if err != nil {
+		t.Fatalf("Transfer: %v", err)
+	}
+	if len(exec.appended) != 1 {
+		t.Fatalf("appended %d events, want 1", len(exec.appended))
+	}
+	var payload struct {
+		TransferID    uuid.UUID `json:"transfer_id"`
+		FromAccountID uuid.UUID `json:"from_account_id"`
+		ToAccountID   uuid.UUID `json:"to_account_id"`
+		AmountCents   int64     `json:"amount_cents"`
+	}
+	if err := json.Unmarshal(exec.appended[0].Payload, &payload); err != nil {
+		t.Fatalf("event payload is not valid JSON: %v", err)
+	}
+	if payload.TransferID != res.TransferID || payload.FromAccountID != cmd.FromAccountID ||
+		payload.ToAccountID != cmd.ToAccountID || payload.AmountCents != cmd.AmountCents {
+		t.Errorf("event payload = %+v, does not match the transfer it describes", payload)
+	}
 }
 
 func TestTransferService_ReplayReturnsStoredResponseWithoutExecutingAgain(t *testing.T) {
@@ -123,6 +170,9 @@ func TestTransferService_ReplayReturnsStoredResponseWithoutExecutingAgain(t *tes
 	if len(exec.executed) != 1 {
 		t.Errorf("executed %d times, want 1", len(exec.executed))
 	}
+	if len(exec.appended) != 1 {
+		t.Errorf("appended %d events, want 1 (a replay must not append a second one)", len(exec.appended))
+	}
 }
 
 func TestTransferService_SameKeyDifferentFingerprintIsRejected(t *testing.T) {
@@ -143,6 +193,9 @@ func TestTransferService_SameKeyDifferentFingerprintIsRejected(t *testing.T) {
 	if len(exec.executed) != 1 {
 		t.Errorf("executed %d times, want 1", len(exec.executed))
 	}
+	if len(exec.appended) != 1 {
+		t.Errorf("appended %d events, want 1", len(exec.appended))
+	}
 }
 
 func TestTransferService_InFlightKeyIsRejected(t *testing.T) {
@@ -157,6 +210,9 @@ func TestTransferService_InFlightKeyIsRejected(t *testing.T) {
 	}
 	if len(exec.executed) != 0 {
 		t.Errorf("executed %d times, want 0", len(exec.executed))
+	}
+	if len(exec.appended) != 0 {
+		t.Errorf("appended %d events, want 0", len(exec.appended))
 	}
 }
 
@@ -185,6 +241,9 @@ func TestTransferService_InvalidInputDoesNotTouchIdempotencyStore(t *testing.T) 
 			if len(exec.keys) != 0 {
 				t.Errorf("invalid input consumed an idempotency key: %v", exec.keys)
 			}
+			if len(exec.appended) != 0 {
+				t.Errorf("invalid input appended an event: %v", exec.appended)
+			}
 		})
 	}
 }
@@ -201,11 +260,17 @@ func TestTransferService_FailedTransferReleasesTheKeyForRetry(t *testing.T) {
 	if len(exec.keys) != 0 {
 		t.Fatalf("failed transfer left a key behind: %v", exec.keys)
 	}
+	if len(exec.appended) != 0 {
+		t.Fatalf("failed transfer appended an event: %v", exec.appended)
+	}
 
 	exec.execErr = nil
 	res, err := svc.Transfer(context.Background(), cmd)
 	if err != nil {
 		t.Fatalf("retry: %v", err)
+	}
+	if len(exec.appended) != 1 {
+		t.Errorf("appended %d events after the successful retry, want 1", len(exec.appended))
 	}
 	if res.Replayed {
 		t.Error("retry after a failure must execute, not replay")

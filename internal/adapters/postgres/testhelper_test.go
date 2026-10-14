@@ -19,13 +19,17 @@ import (
 
 const migrationsPath = "file://../../../migrations"
 
-// appRole and appRolePassword mirror deploy/postgres/init/01-app-role.sql:
-// in a real environment that script creates the role before any migration
-// runs, but the test container has no init script, so migration 000002's
-// GRANTs would fail with "role wallet_app does not exist" without this.
+// appRole/appRolePassword and relayRole/relayRolePassword mirror
+// deploy/postgres/init/01-app-role.sql and 02-relay-role.sql: in a real
+// environment those scripts create the roles before any migration runs,
+// but the test container has no init script, so migration 000002's and
+// 000003's GRANTs would fail with "role ... does not exist" without this.
 const (
 	appRole         = "wallet_app"
 	appRolePassword = "wallet_app_dev"
+
+	relayRole         = "wallet_relay"
+	relayRolePassword = "wallet_relay_dev"
 )
 
 // newTestPool starts a throwaway Postgres container, applies every
@@ -69,8 +73,11 @@ func newTestPoolWithDSN(t testing.TB) (*Pool, string) {
 		t.Fatalf("build connection string: %v", err)
 	}
 
-	if err := createAppRole(ctx, dsn); err != nil {
+	if err := createRole(ctx, dsn, appRole, appRolePassword); err != nil {
 		t.Fatalf("create wallet_app role: %v", err)
+	}
+	if err := createRole(ctx, dsn, relayRole, relayRolePassword); err != nil {
+		t.Fatalf("create wallet_relay role: %v", err)
 	}
 	if err := applyMigrations(dsn); err != nil {
 		t.Fatalf("apply migrations: %v", err)
@@ -90,10 +97,11 @@ func newTestPoolWithDSN(t testing.TB) (*Pool, string) {
 	return pool, dsn
 }
 
-// createAppRole connects as the schema owner (the DSN's own credentials) and
-// creates wallet_app, the role migration 000002 grants least-privilege
-// access to. A fresh container never has it until this runs.
-func createAppRole(ctx context.Context, dsn string) error {
+// createRole connects as the schema owner (the DSN's own credentials) and
+// creates a least-privilege role (wallet_app, wallet_relay) that a later
+// migration grants access to. A fresh container never has either role
+// until this runs.
+func createRole(ctx context.Context, dsn, role, password string) error {
 	conn, err := pgx.Connect(ctx, dsn)
 	if err != nil {
 		return fmt.Errorf("connect as schema owner: %w", err)
@@ -101,7 +109,7 @@ func createAppRole(ctx context.Context, dsn string) error {
 	defer conn.Close(ctx)
 
 	_, err = conn.Exec(ctx, fmt.Sprintf(
-		`CREATE ROLE %s LOGIN PASSWORD '%s'`, appRole, appRolePassword,
+		`CREATE ROLE %s LOGIN PASSWORD '%s'`, role, password,
 	))
 	return err
 }
@@ -111,6 +119,11 @@ func createAppRole(ctx context.Context, dsn string) error {
 // of trusting that the migration did what it says.
 func appDSN(dsn string) string {
 	return strings.Replace(dsn, "wallet:wallet@", appRole+":"+appRolePassword+"@", 1)
+}
+
+// relayDSN is appDSN's counterpart for wallet_relay.
+func relayDSN(dsn string) string {
+	return strings.Replace(dsn, "wallet:wallet@", relayRole+":"+relayRolePassword+"@", 1)
 }
 
 func applyMigrations(dsn string) error {

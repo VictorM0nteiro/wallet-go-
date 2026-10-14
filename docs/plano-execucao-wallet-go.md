@@ -441,8 +441,8 @@ outbox, chave de negócio, e por último o exercício de Fx.
 ## X1 — Reversão (`ROLLBACK`/`REFUND`) sem estorno duplicado
 
 - Um transfer de estorno aponta para o `transfer_id` original. Migration nova
-  (`000003`; `000002` já foi usada pelo X8), com `reverses_transfer_id UUID UNIQUE
-  REFERENCES transfers(id)`, para
+  (`000004`; `000002` já foi usada pelo X8, `000003` pelo X5), com
+  `reverses_transfer_id UUID UNIQUE REFERENCES transfers(id)`, para
   impedir dois estornos bem-sucedidos da mesma operação no banco, não só na aplicação.
 - Estorno que exigiria mais saldo do que o disponível vira rejeição com código próprio,
   diferente de `insufficient_funds`, e fica auditável.
@@ -483,7 +483,7 @@ bate com a soma de créditos menos débitos.
 **Pronto quando:** o endpoint responde zero de diferença depois de uma carga, e uma
 divergência forçada num teste aparece como tal.
 
-## X5 — Outbox transacional sem broker
+## X5 — Outbox transacional sem broker ✅
 
 - Evento de transferência concluída gravado na mesma transação do transfer. Tabela
   `outbox` com `event_id`, tipo, payload imutável, tentativas e próximo envio.
@@ -493,7 +493,12 @@ divergência forçada num teste aparece como tal.
   evento é reenviado com o mesmo `event_id`.
 
 **Pronto quando:** o cenário de interrupção acima termina com o evento entregue pelo
-menos uma vez e nunca perdido.
+menos uma vez e nunca perdido. Feito: `docs/adr/0007-outbox-relay-no-broker.md`,
+migração `000003`, `internal/adapters/postgres/{outbox,relay}.go`, `cmd/relay`. O
+teste de interrupção é
+`TestOutboxRelay_FailedPublishLeavesRowUnpublishedAndRedeliversSameEventID`, e foi
+reproduzido manualmente parando e religando o container `relay` via
+`docker compose stop/start relay` com uma transferência real no meio.
 
 ## X6 — Chave de referência externa
 
