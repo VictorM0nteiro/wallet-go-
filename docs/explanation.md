@@ -68,11 +68,19 @@ hipótese errou. Em todos os cenários, o ledger permaneceu correto, provado no 
 cada chave de idempotência (uma transação morta não deixa nem o próprio registro da
 tentativa, porque claim e execução são a mesma transação).
 
+**Rate limiting por chave de API, não por IP.** Um token bucket (`golang.org/x/time/rate`)
+limita cada chave de API a uma taxa configurável, por padrão 50 requisições/s com um
+pico de 100 — ativado por padrão, seguindo a mesma postura de "seguro por padrão" da
+segurança operacional. A decisão de ser por chave, e não por IP ou global, reaproveita
+o modelo de identidade que o projeto já tinha pra idempotência, em vez de criar um
+conceito novo e não-limitado (IP) só pra essa feature.
+
 ## Tecnologias
 
 Go, chi, `pgx/v5` com connection pooling, PostgreSQL 16, Docker e Docker Compose,
 `testcontainers-go` (testes de integração contra banco real, não mocks), `pprof` e
-`go test -bench -benchmem`, `golangci-lint`, GitHub Actions, e um harness de carga e um
+`go test -bench -benchmem`, `golangci-lint`, GitHub Actions, `golang.org/x/time/rate`
+(token bucket), e um harness de carga e um
 perfilador de falhas escritos à mão, em Go.
 
 ## Resultados

@@ -27,6 +27,8 @@ cp .env.example .env
 | `WALLET_API_KEY_READONLY` | no |     | A second key that can only read (`balance`, `entries`); anything else answers `403`. Unset disables the check. |
 | `LISTEN_ADDR`    | no       | `:8080` | Address the HTTP server listens on            |
 | `WALLET_TRANSFER_STRATEGY` | no | `locking` | Concurrency strategy for transfers: `locking` or `serializable`. See [concurrency-strategies.md](concurrency-strategies.md). |
+| `WALLET_RATE_LIMIT_RPS` | no | `50` | Per-API-key token bucket, requests/second. `0` disables rate limiting entirely. See [ADR 6](adr/0006-rate-limiting-per-api-key.md). |
+| `WALLET_RATE_LIMIT_BURST` | no | `100` | Token bucket capacity. Must be positive while `WALLET_RATE_LIMIT_RPS` is nonzero. |
 
 The `.env` file is git-ignored. Always run the app from the repository root,
 because that is where `.env` is looked up.
@@ -135,6 +137,7 @@ Errors are returned as `{"error":{"code":"...","message":"..."}}`.
 | 404    | `account_not_found`                                                               |
 | 409    | `account_already_exists`, `request_in_flight`, `concurrent_conflict`             |
 | 422    | `invalid_amount`, `same_account`, `insufficient_funds`, `idempotency_key_reuse`, `invalid_owner`, `amount_overflow` |
+| 429    | `rate_limited` (see `Retry-After` header; `WALLET_RATE_LIMIT_RPS`)                |
 | 503    | `service_unavailable` (request or database timeout)                               |
 | 500    | `internal_error`                                                                  |
 

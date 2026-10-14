@@ -18,6 +18,10 @@ type Deps struct {
 	DB             Pinger
 	APIKey         string
 	ReadOnlyAPIKey string
+	// RateLimitRPS <= 0 disables rate limiting entirely: no middleware is
+	// inserted, zero overhead. See docs/adr/0006-rate-limiting-per-api-key.md.
+	RateLimitRPS   float64
+	RateLimitBurst int
 	RequestTimeout time.Duration
 	Logger         *slog.Logger
 }
@@ -42,6 +46,9 @@ func NewRouter(d Deps) http.Handler {
 
 	r.Group(func(r chi.Router) {
 		r.Use(apiKeyAuth(d.APIKey, d.ReadOnlyAPIKey))
+		if d.RateLimitRPS > 0 {
+			r.Use(rateLimit(newPerScopeLimiters(d.RateLimitRPS, d.RateLimitBurst)))
+		}
 		r.Get("/accounts/{id}/balance", h.balance)
 		r.Get("/accounts/{id}/entries", h.entries)
 

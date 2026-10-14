@@ -12,6 +12,11 @@ once the Postgres config changed and those numbers stopped being the current bas
 (see "Postgres configuration" below). They are not lost: every file is in git history up
 to commit `2b1c222`, retrievable with `git show 2b1c222:docs/bench/<filename>`.
 
+Every run logged in this document predates rate limiting (added in
+[ADR 6](../adr/0006-rate-limiting-per-api-key.md)), which now defaults to 50 req/s per
+API key. Reproducing any of these numbers requires `WALLET_RATE_LIMIT_RPS=0` on the API
+first — see [loadtest.md](../loadtest.md).
+
 ## Environment
 
 | Item | Value |

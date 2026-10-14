@@ -11,6 +11,7 @@ require (
 	github.com/shirou/gopsutil/v4 v4.26.6
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
+	golang.org/x/time v0.15.0
 )
 
 require (

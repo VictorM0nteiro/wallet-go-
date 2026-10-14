@@ -28,6 +28,8 @@ type config struct {
 	addr           string
 	strategy       string
 	maxConns       int32
+	rateLimitRPS   float64
+	rateLimitBurst int
 }
 
 func loadConfig() (config, error) {
@@ -72,9 +74,37 @@ func loadConfig() (config, error) {
 		return config{}, errors.New("WALLET_API_KEY_READONLY must be different from WALLET_API_KEY")
 	}
 
+	// Per-API-key token bucket (see docs/adr/0006-rate-limiting-per-api-key.md).
+	// 0 disables it entirely -- used by cmd/loadtest runs that need to
+	// reproduce docs/bench/RESULTS.md unthrottled.
+	rateLimitRPS := 50.0
+	if v := os.Getenv("WALLET_RATE_LIMIT_RPS"); v != "" {
+		n, err := strconv.ParseFloat(v, 64)
+		if err != nil || n < 0 {
+			return config{}, fmt.Errorf("WALLET_RATE_LIMIT_RPS must be a non-negative number, got %q", v)
+		}
+		rateLimitRPS = n
+	}
+	rateLimitBurst := 100
+	if v := os.Getenv("WALLET_RATE_LIMIT_BURST"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return config{}, fmt.Errorf("WALLET_RATE_LIMIT_BURST must be an integer, got %q", v)
+		}
+		rateLimitBurst = n
+	}
+	// A burst of 0 (or negative) does not mean "disabled" -- rate.Limiter
+	// would reject every single request, forever, which is a config
+	// mistake, not an intentional lockout. rateLimitRPS == 0 is the one and
+	// only way to disable rate limiting.
+	if rateLimitRPS > 0 && rateLimitBurst <= 0 {
+		return config{}, fmt.Errorf("WALLET_RATE_LIMIT_BURST must be positive when WALLET_RATE_LIMIT_RPS is set, got %d", rateLimitBurst)
+	}
+
 	return config{
 		dsn: dsn, apiKey: apiKey, readOnlyAPIKey: readOnlyAPIKey,
 		addr: addr, strategy: strategy, maxConns: maxConns,
+		rateLimitRPS: rateLimitRPS, rateLimitBurst: rateLimitBurst,
 	}, nil
 
 }
@@ -136,6 +166,8 @@ func run() error {
 			DB:             pool,
 			APIKey:         cfg.apiKey,
 			ReadOnlyAPIKey: cfg.readOnlyAPIKey,
+			RateLimitRPS:   cfg.rateLimitRPS,
+			RateLimitBurst: cfg.rateLimitBurst,
 			RequestTimeout: 5 * time.Second,
 			Logger:         logger,
 		}),
@@ -147,7 +179,8 @@ func run() error {
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
-	logger.Info("wallet: listening", "addr", cfg.addr, "transfer_strategy", cfg.strategy, "db_max_conns", cfg.maxConns)
+	logger.Info("wallet: listening", "addr", cfg.addr, "transfer_strategy", cfg.strategy, "db_max_conns", cfg.maxConns,
+		"rate_limit_rps", cfg.rateLimitRPS, "rate_limit_burst", cfg.rateLimitBurst)
 
 	select {
 	case err := <-errCh:

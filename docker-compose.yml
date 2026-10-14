@@ -67,6 +67,11 @@ services:
     environment:
       WALLET_TRANSFER_STRATEGY: ${WALLET_TRANSFER_STRATEGY:-locking}
       WALLET_DB_MAX_CONNS: ${WALLET_DB_MAX_CONNS:-30}
+      # Per-API-key token bucket (ADR 6). 0 disables it -- set
+      # WALLET_RATE_LIMIT_RPS=0 before running cmd/loadtest, or every stage
+      # breaks on 429s instead of on the API's real capacity.
+      WALLET_RATE_LIMIT_RPS: ${WALLET_RATE_LIMIT_RPS:-50}
+      WALLET_RATE_LIMIT_BURST: ${WALLET_RATE_LIMIT_BURST:-100}
       # wallet_app is the least-privilege role from migration 000002 (X8):
       # no UPDATE/DELETE on entries, UPDATE only on idempotency_keys' state
       # columns. migrate above still runs as wallet, the schema owner.

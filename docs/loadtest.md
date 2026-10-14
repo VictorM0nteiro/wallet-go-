@@ -33,6 +33,14 @@ library, and it refuses to run against any host other than `localhost`.
 - The API running and reachable (see [running-locally.md](running-locally.md)).
 - `WALLET_API_KEY` of the API equal to `-key` (default `dev-key`, which matches
   `.env.example`).
+- **`WALLET_RATE_LIMIT_RPS=0` on the API.** The default (`50` requests/s per key, see
+  [ADR 6](adr/0006-rate-limiting-per-api-key.md)) is far below what this tool measures
+  (hundreds to thousands of req/s) — left on, every stage breaks on `429`s instead of
+  on the API's real capacity. No change to this tool is needed: a `429` is just another
+  non-2xx status, counted the same way any other failure is. Set the variable and
+  restart the API (`docker compose up -d app` after editing `.env`, or `--build` if the
+  image needs rebuilding) before running a measurement that should land in
+  `docs/bench/RESULTS.md`.
 
 ## Usage
 

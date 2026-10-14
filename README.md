@@ -148,6 +148,9 @@ linked ADR:
   [ADR 1](docs/adr/0001-balance-derived-from-ledger.md)
 - **No external currency conversion.** Decided against, not an oversight — see
   [ADR 5](docs/adr/0005-no-external-currency-conversion.md) and "Known limitations."
+- **Rate limiting is per API key, not per IP or global.** A token bucket (50 req/s,
+  burst 100 by default) reuses the identity the project already has, on by default.
+  [ADR 6](docs/adr/0006-rate-limiting-per-api-key.md)
 
 ## Load testing
 
@@ -190,6 +193,10 @@ Integration tests spin up their own disposable PostgreSQL via testcontainers-go.
 - **Account creation is not idempotency-key gated.** It relies on the
   `UNIQUE(owner_id, kind, currency)` constraint instead (`409` on repeat), which is a
   narrower guarantee than the `Idempotency-Key` contract used by money-moving endpoints.
+- **Rate limiting protects nothing before authentication.** It runs after `apiKeyAuth`,
+  so a caller hammering the API with invalid keys only ever gets `401` — unauthenticated
+  abuse protection is an edge/reverse-proxy concern this project doesn't take on. See
+  [ADR 6](docs/adr/0006-rate-limiting-per-api-key.md).
 - No multi-currency, no real authentication beyond a static API key, no KYC, no scheduled
   or future-dated transfers, no payment system integration — all deliberately out of scope,
   see [docs/escopo-carteira-go.md](docs/escopo-carteira-go.md) §2.
