@@ -25,9 +25,10 @@ show up in production, not in `docker compose`:
 
 Option 2. There is no `balance` column anywhere in the schema. Every deposit,
 withdrawal and transfer is one or two rows in `entries`, and a transfer's two entries
-always sum to zero (double-entry). This is enforced and tested as an invariant — see
+always sum to zero (double-entry). This is *tested* as an invariant — see
 `internal/adapters/postgres/transfer_executor_test.go` and the CI-run invariant checks
-in `docs/escopo-carteira-go.md` §3.
+in `docs/escopo-carteira-go.md` §3 — not enforced by the schema itself; see the
+consequence on that below.
 
 ## Consequences
 
@@ -44,3 +45,15 @@ in `docs/escopo-carteira-go.md` §3.
   transfer, non-negative balance per customer account) are things a test can check
   mechanically. A stored-balance design has no equivalent invariant to check against —
   the column just is whatever the last `UPDATE` left it.
+- **The zero-sum invariant lives in the test suite, not in the schema.** `entries` has a
+  per-row `CHECK (amount_cents <> 0)` (`migrations/000001_init_schema.up.sql`), but
+  nothing enforces that the rows sharing a `transfer_id` sum to zero — that would need a
+  constraint trigger or a deferred constraint, neither exists. A row inserted outside
+  this project's own code (a manual `INSERT`, a different application sharing the
+  database) could break the invariant and Postgres would not object; only the next
+  test run, or a reconciliation job that doesn't exist yet, would notice. `wallet_app`'s
+  least-privilege grant (migration `000002`, X8 in the execution plan) closes part of
+  this gap by removing `UPDATE`/`DELETE` on `entries` entirely, but it does not — and a
+  column-and-row grant model cannot — stop a privileged `INSERT` from being unbalanced.
+  That remains a trust boundary this project draws at "the application's own code is
+  the only writer," not one the database enforces on its own.

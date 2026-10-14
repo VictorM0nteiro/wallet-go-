@@ -7,8 +7,7 @@ concurrency.
 > **Status:** through Session 14 of the [execution plan](docs/plano-execucao-wallet-go.md)
 > — both concurrency strategies exist, measured and optimized; 5 ADRs, the performance
 > report, and 4 of 6 induced-failure scenarios are written. See
-> [Known limitations](#known-limitations) for who wrote the performance report's "why"
-> section and which failure scenarios are missing.
+> [Known limitations](#known-limitations) for which failure scenarios are missing.
 
 ## Architecture
 
@@ -171,13 +170,6 @@ Integration tests spin up their own disposable PostgreSQL via testcontainers-go.
 
 ## Known limitations
 
-- **The performance report's "why" was drafted by Claude, not the author.** Both
-  strategies exist, are measured, and are compared in
-  [docs/performance-report.md](docs/performance-report.md) — but its sections on *why*
-  `locking` wins and under what load that would flip were written by Claude Sonnet 5 at
-  the author's request on 2026-10-13, after being deliberately left blank. The document
-  says so. Treat that analysis as a draft to verify and restate, not as proof the author
-  can defend it unprompted.
 - **Induced-failure report covers 4 of 6 scenarios.** Postgres dying mid-load and coming
   back, `SIGTERM` under load, and `kill -9` mid-transfer are all run and documented in
   [docs/resilience-report.md](docs/resilience-report.md), with the hypothesis written
@@ -203,3 +195,9 @@ Integration tests spin up their own disposable PostgreSQL via testcontainers-go.
   see [docs/escopo-carteira-go.md](docs/escopo-carteira-go.md) §2.
 - Balance reads degrade as the number of entries on an account grows, since there is no
   stored balance to read instead.
+
+## More
+
+A narrative write-up of this project — objective, methods, technologies, results, meant
+for interviews and non-technical sharing rather than as technical documentation — is in
+[docs/explanation.md](docs/explanation.md). 

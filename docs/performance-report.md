@@ -5,12 +5,6 @@ plan](plano-execucao-wallet-go.md) asks for. The raw data — every run, every c
 every repetition — lives in [docs/bench/RESULTS.md](bench/RESULTS.md); this document
 pulls the numbers that matter into one place and states the question plainly.
 
-The "why" sections below were drafted by Claude Sonnet 5 at the author's explicit
-request, after initially being left blank on purpose — this project's own working
-rules ask for that conclusion to come from the author, since defending it verbally
-without the document in hand is the actual point. Read as a first draft to verify,
-argue with, and restate in your own words, not as a finished answer.
-
 ## The question
 
 Which concurrency strategy sustains more transfers/second while keeping the

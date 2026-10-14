@@ -58,9 +58,15 @@ func (m Money) Sub(other Money) (Money, error) {
 func (m Money) String() string {
 	cents := int64(m)
 	sign := ""
+	// Negate in uint64, not int64: -math.MinInt64 overflows back to
+	// math.MinInt64 in int64 arithmetic (its magnitude, 2^63, has no
+	// positive int64 representation), which Add and Sub already guard
+	// against explicitly. uint64 has the range to hold that magnitude, so
+	// this is correct for every int64 value, MinInt64 included.
+	abs := uint64(cents)
 	if cents < 0 {
 		sign = "-"
-		cents = -cents
+		abs = -abs
 	}
-	return fmt.Sprintf("%sR$ %d,%02d", sign, cents/100, cents%100)
+	return fmt.Sprintf("%sR$ %d,%02d", sign, abs/100, abs%100)
 }

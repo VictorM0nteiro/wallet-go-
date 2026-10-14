@@ -18,9 +18,9 @@ import (
 var _ app.TransferExecutor = (*SerializableTransferExecutor)(nil)
 
 const (
-	deafaultMaxAttempts = 10
-	baseBackoff         = 5 * time.Millisecond
-	maxBackoff          = 200 * time.Millisecond
+	defaultMaxAttempts = 10
+	baseBackoff        = 5 * time.Millisecond
+	maxBackoff         = 200 * time.Millisecond
 )
 
 // SerializableTransferExecutor is concurrency strategy 2: no explicit row
@@ -35,7 +35,7 @@ type SerializableTransferExecutor struct {
 }
 
 func NewSerializableTransferExecutor(pool *Pool) *SerializableTransferExecutor {
-	return &SerializableTransferExecutor{pool: pool, maxAttempts: deafaultMaxAttempts}
+	return &SerializableTransferExecutor{pool: pool, maxAttempts: defaultMaxAttempts}
 }
 
 // Retries reports how many serialization failures were retried since the

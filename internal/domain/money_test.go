@@ -68,6 +68,12 @@ func TestMoney_String(t *testing.T) {
 		{99, "R$ 0,99"},
 		{100, "R$ 1,00"},
 		{9700, "R$ 97,00"},
+		{-500, "-R$ 5,00"},
+		// Regression: negating math.MinInt64 in int64 arithmetic overflows
+		// back to math.MinInt64 itself (no positive int64 can hold 2^63),
+		// which used to make this print a garbled, wrong value instead of
+		// the magnitude below.
+		{math.MinInt64, "-R$ 92233720368547758,08"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
