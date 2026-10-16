@@ -28,7 +28,7 @@ func nextAttempt(attempts int) time.Time {
 	if ceiling > relayMaxBackoff || ceiling <= 0 {
 		ceiling = relayMaxBackoff
 	}
-	wait := time.Duration(rand.Int64N(int64(ceiling)))
+	wait := time.Duration(rand.Int64N(int64(ceiling))) //nolint:gosec // jitter does not need crypto randomness
 	return time.Now().Add(wait)
 }
 

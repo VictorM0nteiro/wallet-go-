@@ -58,7 +58,11 @@ func loadConfig() (config, error) {
 
 	maxConns := int32(30)
 	if v := os.Getenv("WALLET_DB_MAX_CONNS"); v != "" {
-		n, err := strconv.Atoi(v)
+		// ParseInt with bitSize 32, not Atoi: Atoi returns a platform-width
+		// int, and truncating that into int32 would silently wrap a huge
+		// value instead of rejecting it. ParseInt errors with ErrRange
+		// itself when v doesn't fit in 32 bits.
+		n, err := strconv.ParseInt(v, 10, 32)
 		if err != nil || n <= 0 {
 			return config{}, fmt.Errorf("WALLET_DB_MAX_CONNS must be a positive integer, got %q", v)
 		}

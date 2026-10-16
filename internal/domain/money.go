@@ -63,7 +63,7 @@ func (m Money) String() string {
 	// positive int64 representation), which Add and Sub already guard
 	// against explicitly. uint64 has the range to hold that magnitude, so
 	// this is correct for every int64 value, MinInt64 included.
-	abs := uint64(cents)
+	abs := uint64(cents) //nolint:gosec // deliberate: see the comment above, this is the MinInt64 fix
 	if cents < 0 {
 		sign = "-"
 		abs = -abs

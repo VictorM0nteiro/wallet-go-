@@ -8,11 +8,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/VictorM0nteiro/wallet-go/internal/app"
-	"github.com/VictorM0nteiro/wallet-go/internal/domain"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/VictorM0nteiro/wallet-go/internal/app"
+	"github.com/VictorM0nteiro/wallet-go/internal/domain"
 )
 
 var _ app.TransferExecutor = (*SerializableTransferExecutor)(nil)

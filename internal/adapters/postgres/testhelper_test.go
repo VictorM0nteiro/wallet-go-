@@ -106,7 +106,7 @@ func createRole(ctx context.Context, dsn, role, password string) error {
 	if err != nil {
 		return fmt.Errorf("connect as schema owner: %w", err)
 	}
-	defer conn.Close(ctx)
+	defer func() { _ = conn.Close(ctx) }()
 
 	_, err = conn.Exec(ctx, fmt.Sprintf(
 		`CREATE ROLE %s LOGIN PASSWORD '%s'`, role, password,

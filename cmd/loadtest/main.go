@@ -525,7 +525,7 @@ func captureEnvironment(ctx context.Context, dsn string) (benchEnvironment, erro
 // overwriting each other.
 func writeBenchReport(rep benchReport) (string, error) {
 	dir := filepath.Join("docs", "bench")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return "", err
 	}
 	path := filepath.Join(dir, fmt.Sprintf("%s-seed%d-%s.json", rep.Scenario, rep.Seed, rep.Timestamp.Format("20060102-150405")))

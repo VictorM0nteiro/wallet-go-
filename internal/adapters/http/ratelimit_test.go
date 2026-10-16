@@ -19,8 +19,8 @@ func rateLimitTestHandler(limiters perScopeLimiters) http.Handler {
 }
 
 func doScopedRequest(h http.Handler, scope apiKeyScope) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req = req.WithContext(context.WithValue(req.Context(), apiKeyScopeKey, scope))
+	ctx := context.WithValue(context.Background(), apiKeyScopeKey, scope)
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec
