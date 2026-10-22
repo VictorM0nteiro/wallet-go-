@@ -90,7 +90,23 @@
           "expr": "wallet_outbox_oldest_pending_age_seconds",
           "legendFormat": "oldest age (s)"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "oldest age (s)" },
+            "properties": [
+              { "id": "unit", "value": "s" },
+              { "id": "custom.axisPlacement", "value": "right" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "pending" },
+            "properties": [{ "id": "custom.axisPlacement", "value": "left" }]
+          }
+        ]
+      }
     },
     {
       "id": 6,

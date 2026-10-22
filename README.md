@@ -172,11 +172,12 @@ linked ADR:
   ![Grafana dashboard under cmd/loadtest traffic](docs/img/grafana-dashboard.png)
 
   Captured while `cmd/loadtest` ramped from 8 to 32 workers: the outbox lag panel
-  shows the relay's default 1s/20-row poll genuinely falling behind the burst
-  (pending events climbing into the tens of thousands before draining), and the DB
-  pool panel shows `wallet_db_pool_acquired_conns` saturating at `WALLET_DB_MAX_CONNS`
-  — both exactly the kind of signal this pass was meant to make visible, not a flat
-  idle screenshot.
+  plots `pending` and `oldest age (s)` on independent axes — they differ by orders of
+  magnitude, so sharing one flattened the age line to zero — showing pending events
+  climbing toward 100k while the relay's default 1s/20-row poll genuinely falls
+  behind, and the DB pool panel shows `wallet_db_pool_acquired_conns` saturating at
+  `WALLET_DB_MAX_CONNS`. Both are exactly the kind of signal this pass was meant to
+  make visible, not a flat idle screenshot.
 
 ## Load testing
 
