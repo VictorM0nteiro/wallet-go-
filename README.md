@@ -70,6 +70,11 @@ cmd/relay/              polls the outbox, delivers events at least once (ADR 7)
 Full rationale and the locked-in decisions live in
 [docs/escopo-carteira-go.md](docs/escopo-carteira-go.md) and in [docs/adr/](docs/adr/).
 
+Component-level dependency graph, generated from the repo by
+[gitdiagram.com](https://gitdiagram.com/victorm0nteiro/wallet-go-):
+
+![Component dependency diagram](docs/img/diagram.png)
+
 ## The ledger
 
 A ledger is the immutable, ordered record of every movement of value in the system. There
