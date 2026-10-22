@@ -66,7 +66,7 @@ func TestHealthEndpoints_DoNotRequireAPIKey(t *testing.T) {
 		RequestTimeout: testRequestTimeout,
 		Logger:         testLogger(),
 	})
-	for _, path := range []string{"/healthz", "/readyz"} {
+	for _, path := range []string{"/healthz", "/readyz", "/metrics"} {
 		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)

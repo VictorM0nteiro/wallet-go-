@@ -48,6 +48,7 @@ type Handler struct {
 	transfers transferService
 	scope     string
 	logger    *slog.Logger
+	metrics   *httpMetricsRecorder
 }
 
 func (h *Handler) createAccount(w http.ResponseWriter, r *http.Request) {
@@ -116,6 +117,7 @@ func (h *Handler) cashOp(w http.ResponseWriter, r *http.Request, op string, run 
 		h.writeError(w, r, err)
 		return
 	}
+	h.metrics.transfers.WithLabelValues(op, strconv.FormatBool(res.Replayed)).Inc()
 	writeResult(w, res)
 }
 
@@ -162,6 +164,7 @@ func (h *Handler) transfer(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, err)
 		return
 	}
+	h.metrics.transfers.WithLabelValues("transfers", strconv.FormatBool(res.Replayed)).Inc()
 	writeResult(w, res)
 }
 

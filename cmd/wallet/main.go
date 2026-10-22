@@ -161,6 +161,14 @@ func run() error {
 		return err
 	}
 	transfers := app.NewTransferService(executor)
+
+	registry := httpapi.NewRegistry()
+	postgres.RegisterPoolStats(registry, pool)
+	// Outbox lag is NOT registered here: wallet_app (this process's DB
+	// role) only has INSERT on outbox, never SELECT -- the lag query would
+	// fail every scrape. cmd/relay connects as wallet_relay, which does
+	// have SELECT, and registers it there instead.
+
 	srv := &http.Server{
 		Addr: cfg.addr,
 		Handler: httpapi.NewRouter(httpapi.Deps{
@@ -174,6 +182,7 @@ func run() error {
 			RateLimitBurst: cfg.rateLimitBurst,
 			RequestTimeout: 5 * time.Second,
 			Logger:         logger,
+			Registry:       registry,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // Deps are the collaborators of the HTTP adapter.
@@ -24,25 +25,40 @@ type Deps struct {
 	RateLimitBurst int
 	RequestTimeout time.Duration
 	Logger         *slog.Logger
+	// Registry collects this process's Prometheus metrics. Built fresh per
+	// NewRouter call (production and every test), never a shared/global
+	// registry. See docs/adr/0008-prometheus-metrics-direct-client.md.
+	Registry *prometheus.Registry
 }
 
-// NewRouter wires the six endpoints, health checks, and the middleware chain.
+// NewRouter wires the six endpoints, health checks, metrics, and the
+// middleware chain.
 func NewRouter(d Deps) http.Handler {
+	if d.Registry == nil {
+		// Every existing test builds Deps{} without a Registry; defaulting
+		// here means only the metrics-specific tests need to pass one.
+		d.Registry = NewRegistry()
+	}
+	metrics := newHTTPMetrics(d.Registry)
 	h := &Handler{
 		accounts:  d.Accounts,
 		cash:      d.Cash,
 		transfers: d.Transfers,
 		scope:     scopeFor(d.APIKey),
 		logger:    d.Logger,
+		metrics:   metrics,
 	}
 
 	r := chi.NewRouter()
-	r.Use(requestID, accessLog(d.Logger), recoverer(d.Logger), timeout(d.RequestTimeout))
+	r.Use(requestID, accessLog(d.Logger), recoverer(d.Logger), timeout(d.RequestTimeout), httpMetrics(metrics))
 
-	// Health checks are unauthenticated: the orchestrator polling them has
-	// no API key, and they must work even if a caller's key is wrong.
+	// Health checks and metrics are unauthenticated: the orchestrator
+	// polling health has no API key, and Prometheus's own scrape model has
+	// no simple way to carry one either. None of the three leak account
+	// data -- only process liveness and operational counts/histograms.
 	r.Get("/healthz", healthz)
 	r.Get("/readyz", readyz(d.DB))
+	r.Get("/metrics", metricsHandler(d.Registry))
 
 	r.Group(func(r chi.Router) {
 		r.Use(apiKeyAuth(d.APIKey, d.ReadOnlyAPIKey))

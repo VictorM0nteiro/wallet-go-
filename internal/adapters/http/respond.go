@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/VictorM0nteiro/wallet-go/internal/app"
 )
 
@@ -33,6 +35,7 @@ func writeResult(w http.ResponseWriter, res app.TransferResult) {
 
 func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	status, code := statusFor(err)
+	h.metrics.errors.WithLabelValues(chi.RouteContext(r.Context()).RoutePattern(), code).Inc()
 	msg := err.Error()
 	if status >= http.StatusInternalServerError {
 		msg = http.StatusText(status)
