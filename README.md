@@ -120,6 +120,7 @@ docker compose --profile tools run --rm migrate
 |---|---|---|---|
 | GET  | `/healthz` | no | — |
 | GET  | `/readyz` | no | — |
+| GET  | `/metrics` | no | — |
 | POST | `/accounts` | yes | no |
 | POST | `/accounts/{id}/deposits` | yes | required |
 | POST | `/accounts/{id}/withdrawals` | yes | required |
@@ -162,6 +163,20 @@ linked ADR:
 - **Every completed transfer (so every deposit and withdrawal too) is recorded in a
   transactional outbox**, delivered at least once by a separate polling process
   (`cmd/relay`), no message broker. [ADR 7](docs/adr/0007-outbox-relay-no-broker.md)
+- **Observability is the Prometheus client direct, not the OpenTelemetry SDK.**
+  `/metrics` on both `cmd/wallet` and `cmd/relay`, a Grafana dashboard provisioned by
+  code (`deploy/grafana/provisioning/`), no distributed tracing (nothing crosses
+  services yet) and no alerting rules.
+  [ADR 8](docs/adr/0008-prometheus-metrics-direct-client.md)
+
+  ![Grafana dashboard under cmd/loadtest traffic](docs/img/grafana-dashboard.png)
+
+  Captured while `cmd/loadtest` ramped from 8 to 32 workers: the outbox lag panel
+  shows the relay's default 1s/20-row poll genuinely falling behind the burst
+  (pending events climbing into the tens of thousands before draining), and the DB
+  pool panel shows `wallet_db_pool_acquired_conns` saturating at `WALLET_DB_MAX_CONNS`
+  — both exactly the kind of signal this pass was meant to make visible, not a flat
+  idle screenshot.
 
 ## Load testing
 
