@@ -5,14 +5,19 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/VictorM0nteiro/wallet-go/internal/adapters/postgres"
 )
@@ -21,6 +26,7 @@ type config struct {
 	dsn          string
 	pollInterval time.Duration
 	batchSize    int
+	metricsAddr  string
 }
 
 func loadConfig() (config, error) {
@@ -49,7 +55,15 @@ func loadConfig() (config, error) {
 		batchSize = n
 	}
 
-	return config{dsn: dsn, pollInterval: pollInterval, batchSize: batchSize}, nil
+	metricsAddr := os.Getenv("RELAY_METRICS_ADDR")
+	if metricsAddr == "" {
+		metricsAddr = ":9091"
+	}
+	if !strings.Contains(metricsAddr, ":") {
+		return config{}, fmt.Errorf("RELAY_METRICS_ADDR must be host:port or :port, got %q", metricsAddr)
+	}
+
+	return config{dsn: dsn, pollInterval: pollInterval, batchSize: batchSize, metricsAddr: metricsAddr}, nil
 }
 
 func main() {
@@ -85,17 +99,46 @@ func run() error {
 	}
 	defer pool.Close()
 
-	relay := postgres.NewOutboxRelay(pool)
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(collectors.NewGoCollector())
+	registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+	relayMetrics := postgres.NewRelayMetrics(registry)
+	// wallet_relay is the only role with SELECT on outbox (migration
+	// 000003_outbox.up.sql): wallet_app, which cmd/wallet connects as, can
+	// only INSERT into it. The lag gauges live here, not in cmd/wallet's
+	// registry, for that reason -- not just because "any pool could run the
+	// query" in the abstract.
+	postgres.RegisterOutboxLag(registry, pool, logger)
+
+	relay := postgres.NewOutboxRelay(pool).WithMetrics(relayMetrics)
 	publisher := postgres.LogPublisher{Logger: logger}
 
-	logger.Info("relay: polling", "poll_interval", cfg.pollInterval, "batch_size", cfg.batchSize)
+	metricsSrv := &http.Server{
+		Addr:              cfg.metricsAddr,
+		Handler:           promhttp.HandlerFor(registry, promhttp.HandlerOpts{}),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	metricsErrCh := make(chan error, 1)
+	go func() { metricsErrCh <- metricsSrv.ListenAndServe() }()
+
+	logger.Info("relay: polling", "poll_interval", cfg.pollInterval, "batch_size", cfg.batchSize,
+		"metrics_addr", cfg.metricsAddr)
 	ticker := time.NewTicker(cfg.pollInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			logger.Info("relay: shutting down")
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := metricsSrv.Shutdown(shutdownCtx); err != nil {
+				return fmt.Errorf("metrics server graceful shutdown: %w", err)
+			}
 			return nil
+		case err := <-metricsErrCh:
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				return fmt.Errorf("metrics server: %w", err)
+			}
 		case <-ticker.C:
 			published, err := relay.PollOnce(ctx, publisher, cfg.batchSize)
 			if err != nil {

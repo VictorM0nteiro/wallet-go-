@@ -15,4 +15,5 @@ ENTRYPOINT ["/wallet"]
 FROM gcr.io/distroless/static-debian12 AS relay
 COPY --from=build /relay /relay
 USER nonroot:nonroot
+EXPOSE 9091
 ENTRYPOINT ["/relay"]

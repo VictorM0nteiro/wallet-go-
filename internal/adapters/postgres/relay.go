@@ -34,12 +34,22 @@ func nextAttempt(attempts int) time.Time {
 
 // OutboxRelay delivers outbox events at least once by polling.
 type OutboxRelay struct {
-	pool *Pool
+	pool    *Pool
+	metrics *RelayMetrics
 }
 
-// NewOutboxRelay builds an OutboxRelay backed by pool.
+// NewOutboxRelay builds an OutboxRelay backed by pool. metrics may be nil
+// (every existing caller/test that doesn't care about observability keeps
+// working); use WithMetrics to attach one.
 func NewOutboxRelay(pool *Pool) *OutboxRelay {
 	return &OutboxRelay{pool: pool}
+}
+
+// WithMetrics attaches m and returns r, for chaining at construction time:
+// relay := NewOutboxRelay(pool).WithMetrics(m).
+func (r *OutboxRelay) WithMetrics(m *RelayMetrics) *OutboxRelay {
+	r.metrics = m
+	return r
 }
 
 // PollOnce processes up to batchSize pending events, one transaction per
@@ -59,6 +69,9 @@ func NewOutboxRelay(pool *Pool) *OutboxRelay {
 // batch neither loses nor duplicates row 1's result, because each row has
 // already committed independently by the time row 2 is even selected.
 func (r *OutboxRelay) PollOnce(ctx context.Context, pub Publisher, batchSize int) (published int, err error) {
+	start := time.Now()
+	defer func() { r.metrics.observePoll(time.Since(start)) }()
+
 	for range batchSize {
 		ok, didPublish, err := r.processOne(ctx, pub)
 		if err != nil {
@@ -67,6 +80,7 @@ func (r *OutboxRelay) PollOnce(ctx context.Context, pub Publisher, batchSize int
 		if !ok {
 			break
 		}
+		r.metrics.recordOutcome(didPublish)
 		if didPublish {
 			published++
 		}
