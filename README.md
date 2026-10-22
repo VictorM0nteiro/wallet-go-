@@ -1,5 +1,11 @@
 # wallet-go
 
+[![CI](https://github.com/VictorM0nteiro/wallet-go-/actions/workflows/ci.yml/badge.svg)](https://github.com/VictorM0nteiro/wallet-go-/actions/workflows/ci.yml)
+
+**p99 latency cut from ~74ms to ~25ms** by collapsing 8 sequential database round trips
+per transfer into 2 pipelined ones, measured before and after on the same hardware — see
+[docs/performance-report.md](docs/performance-report.md).
+
 A digital wallet API where the balance is never a stored column — it is derived from an
 append-only ledger, and transfers between accounts are idempotent and correct under
 concurrency.
