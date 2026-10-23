@@ -14,11 +14,16 @@ real elasticity has to live above pgxpool, not inside it.
 ## Options considered
 
 1. **Recalibrate `MinConns`/`MaxConns`/`MaxConnIdleTime` as static config.**
-   Rejected — not because it's wrong, but because it answers a different question
-   than the one asked here. pgxpool already does this much on its own (lazy
-   connection creation up to `MaxConns`, idle shrink down to `MinConns`); picking
-   better fixed numbers would help, but it is still one number chosen in advance,
-   not something that reacts to the load actually happening.
+   Rejected for scope at the time — it answers a different question than the one
+   asked here (a fixed number chosen in advance, not something that reacts to the
+   load actually happening). Tested anyway once elasticity was built (so the
+   ceiling itself wouldn't go unquestioned): `docs/bench/RESULTS.md` §10 reruns a
+   heavy burst at `MaxConns=30` vs. `MaxConns=60` and finds the higher ceiling
+   makes things *worse* (-8% req/s, +90% p99), both ceilings genuinely saturated.
+   This reproduces `docs/bench/RESULTS.md` §9's own earlier conclusion
+   ("latency over throughput, stay at 30 connections") under heavier load — the
+   connection count was never this project's bottleneck, so recalibrating it
+   wouldn't have helped even as a stopgap.
 2. **An external pooler (pgbouncer or similar) in front of Postgres.** Not explored
    in depth, but worth naming: this is the "obvious other way" to get elasticity,
    and it has real advantages (connection multiplexing across processes, not just
@@ -91,6 +96,15 @@ values or whether they're still a guess waiting on more data. -->
 
 ## Consequences
 
+- **Measured, not just reasoned:** `docs/bench/RESULTS.md` §10 drove the real
+  mechanism (`MinConns=5`/`MaxConns=30`) against the live Postgres with genuine
+  sustained saturation. It grew to 13 within ~9s of saturation starting (3 ticks ×
+  3s hysteresis), and shrank back to the floor (5) within ~45s of the load
+  stopping (the cooldown), then held steady for 5 minutes idle with no flapping. A
+  fixed pool reaching the same peak would have held those connections open for up
+  to pgxpool's own default `MaxConnIdleTime` (30 minutes, never configured by this
+  project) before any closed on their own — the elastic pool's real gain is
+  roughly a 30x faster return to baseline connection count, not more peak capacity.
 - **A new goroutine per elastic pool, with its own shutdown ordering.**
   `Pool.Close()` now also stops the resize loop (`poolResizer.stop()`, a
   `sync.WaitGroup` join) before closing the current `pgxpool.Pool`, so no resize can

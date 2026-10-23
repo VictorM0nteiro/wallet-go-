@@ -563,6 +563,62 @@ meaningful change to tail latency — consistent with a fixed per-request cost (
 under load the way the round trips or `fsync` did. Not worth cutting correlated request
 logging for 6%; noted here as measured and closed, not pursued further.
 
+## 10. Elastic pool: revisiting pool size, and real grow/shrink timing (2026-10-22)
+
+Context: [ADR 9](../adr/0009-elastic-db-pool.md) built an elastic pool that keeps the
+*ceiling* at 30 and varies only how many of those 30 connections are actually held
+open at a given moment. Before settling on that framing, the ceiling itself was
+re-tested once more — this time pushed far harder than section 9's methodology (50
+to 400 workers, not 32 to 64), on top of the test data this project has accumulated
+since section 9.
+
+### Does a higher `WALLET_DB_MAX_CONNS` help under heavier load?
+
+Setup: `go run ./cmd/loadtest -scenario spread -stage 6s -start 50 -max 400
+-accounts 30`, `WALLET_RATE_LIMIT_RPS=0`, same machine as the rest of this document,
+run back-to-back on the same day. `wallet_db_pool_acquired_conns` sampled every 1s
+via `/metrics` through the whole run, so "saturated" below is measured, not assumed.
+
+| MaxConns | workers=400: req/s | workers=400: p99 | Acquired at peak |
+|---|---|---|---|
+| 30 | 1405 | 386.8 ms | 30/30 (saturated) |
+| 60 | 1287 | 734.6 ms | 60/60 (saturated) |
+
+**Reading.** Both configurations genuinely saturated their own ceiling. Doubling it
+did not relieve that saturation — it made both throughput and tail latency worse
+(-8% req/s, +90% p99). This reproduces section 9's "Decision: latency over
+throughput, stay at 30 connections" under heavier load and a different session, with
+the opposite of the naive expectation: more connections, worse result. The ceiling
+was not the bottleneck at either size — something downstream was (likely row-lock
+and/or host CPU contention, on a single machine running Postgres, the app,
+Prometheus, Grafana and the relay side by side) — and more connections just gave
+that contention a wider front to happen on simultaneously, not more throughput.
+
+### Elastic pool: real grow/shrink timing against a live Postgres
+
+Setup: a throwaway script (not committed, removed after the run) built the real,
+shipped `postgres.NewPool` (`MinConns=5`, `MaxConns=30`) against the live
+`docker-compose` Postgres, drove 15 concurrent `SELECT pg_sleep(0.05)` queries for
+20s to force genuine sustained saturation, then idled for 6 minutes while reading
+`Stat()` every 10s.
+
+| Event | Time | MaxConns |
+|---|---|---|
+| Start | — | 5 (floor) |
+| Grow triggered (real saturation detected) | ~9s into the load (3 ticks × 3s hysteresis) | 13 |
+| Load stops | t+20s | 13 |
+| Shrink triggered | ~45s after the grow (blocked by cooldown) | 5 (floor) |
+| Idle, 5 minutes straight | — | 5, no flapping |
+
+**Reading.** The mechanism recovered to its floor in under a minute of the burst
+ending. A fixed pool reaching the same peak (13, or whatever a real burst reaches)
+would have held those connections open for up to pgxpool's own default
+`MaxConnIdleTime` (30 minutes, never configured by this project) before any of them
+closed on their own. This is the measured version of the claim in ADR 9's
+Consequences: the gain is roughly a 30x faster return to baseline connection count,
+not more peak capacity — the peak (30) is unchanged on purpose, and the section
+above shows raising it would have made things worse, not better.
+
 ## Still open
 
 - **Remeasure `serializable` under the tuned Postgres config** (section 9's `serializable`

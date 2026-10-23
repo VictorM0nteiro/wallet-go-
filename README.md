@@ -187,7 +187,11 @@ linked ADR:
   `WALLET_DB_MIN_CONNS` and grows toward `WALLET_DB_MAX_CONNS` under sustained
   saturation, shrinking back down when idle — a direct response to the dashboard
   capture above. The swap is guarded by a `sync.RWMutex`, not a bare atomic pointer,
-  after an integration test caught a real race in the simpler version.
+  after an integration test caught a real race in the simpler version. Measured
+  against a live Postgres: it recovers to its floor in under a minute of a burst
+  ending, versus the 30 minutes a fixed pool would need (pgxpool's own idle
+  timeout) — and raising the static ceiling instead was tried and measured to make
+  heavy load *worse* (`docs/bench/RESULTS.md` §10), not better.
   [ADR 9](docs/adr/0009-elastic-db-pool.md)
 
 ## Load testing
