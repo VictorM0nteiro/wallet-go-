@@ -183,6 +183,12 @@ linked ADR:
   behind, and the DB pool panel shows `wallet_db_pool_acquired_conns` saturating at
   `WALLET_DB_MAX_CONNS`. Both are exactly the kind of signal this pass was meant to
   make visible, not a flat idle screenshot.
+- **`cmd/wallet`'s DB pool is elastic**, not a single fixed size: it starts at
+  `WALLET_DB_MIN_CONNS` and grows toward `WALLET_DB_MAX_CONNS` under sustained
+  saturation, shrinking back down when idle — a direct response to the dashboard
+  capture above. The swap is guarded by a `sync.RWMutex`, not a bare atomic pointer,
+  after an integration test caught a real race in the simpler version.
+  [ADR 9](docs/adr/0009-elastic-db-pool.md)
 
 ## Load testing
 
