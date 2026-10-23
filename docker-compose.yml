@@ -69,6 +69,11 @@ services:
     environment:
       WALLET_TRANSFER_STRATEGY: ${WALLET_TRANSFER_STRATEGY:-locking}
       WALLET_DB_MAX_CONNS: ${WALLET_DB_MAX_CONNS:-30}
+      # Empty default, not 0 -- cmd/wallet's loadConfig treats the literal
+      # string "0" as an invalid WALLET_DB_MIN_CONNS (an elastic pool must
+      # have a positive floor), not as "disabled". Empty is what "disabled"
+      # actually means (ADR 9).
+      WALLET_DB_MIN_CONNS: ${WALLET_DB_MIN_CONNS:-}
       # Per-API-key token bucket (ADR 6). 0 disables it -- set
       # WALLET_RATE_LIMIT_RPS=0 before running cmd/loadtest, or every stage
       # breaks on 429s instead of on the API's real capacity.

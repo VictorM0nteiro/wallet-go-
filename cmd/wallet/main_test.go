@@ -12,6 +12,7 @@ func setMinimalEnv(t *testing.T) {
 	t.Setenv("LISTEN_ADDR", "")
 	t.Setenv("WALLET_TRANSFER_STRATEGY", "")
 	t.Setenv("WALLET_DB_MAX_CONNS", "")
+	t.Setenv("WALLET_DB_MIN_CONNS", "")
 	t.Setenv("WALLET_RATE_LIMIT_RPS", "")
 	t.Setenv("WALLET_RATE_LIMIT_BURST", "")
 }
@@ -112,5 +113,49 @@ func TestLoadConfig_RateLimitBurstMustBePositiveWhenEnabled(t *testing.T) {
 
 	if _, err := loadConfig(); err == nil {
 		t.Fatal("loadConfig() error = nil, want an error: burst 0 with a nonzero RPS would reject every request")
+	}
+}
+
+func TestLoadConfig_MinConnsDefaultsToZero(t *testing.T) {
+	setMinimalEnv(t)
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() error = %v, want nil", err)
+	}
+	if cfg.minConns != 0 {
+		t.Errorf("minConns = %d, want 0 (elastic resizing off by default)", cfg.minConns)
+	}
+}
+
+func TestLoadConfig_MinConnsAccepted(t *testing.T) {
+	setMinimalEnv(t)
+	t.Setenv("WALLET_DB_MAX_CONNS", "30")
+	t.Setenv("WALLET_DB_MIN_CONNS", "5")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() error = %v, want nil", err)
+	}
+	if cfg.minConns != 5 {
+		t.Errorf("minConns = %d, want 5", cfg.minConns)
+	}
+}
+
+func TestLoadConfig_MinConnsMustBePositive(t *testing.T) {
+	setMinimalEnv(t)
+	t.Setenv("WALLET_DB_MIN_CONNS", "0")
+
+	if _, err := loadConfig(); err == nil {
+		t.Fatal("loadConfig() error = nil, want an error for WALLET_DB_MIN_CONNS=0 (omit it instead to disable elastic resizing)")
+	}
+}
+
+func TestLoadConfig_MinConnsMustNotExceedMaxConns(t *testing.T) {
+	setMinimalEnv(t)
+	t.Setenv("WALLET_DB_MAX_CONNS", "10")
+	t.Setenv("WALLET_DB_MIN_CONNS", "20")
+
+	if _, err := loadConfig(); err == nil {
+		t.Fatal("loadConfig() error = nil, want an error: a floor above the ceiling makes no sense")
 	}
 }

@@ -27,6 +27,7 @@ type config struct {
 	readOnlyAPIKey string
 	addr           string
 	strategy       string
+	minConns       int32
 	maxConns       int32
 	rateLimitRPS   float64
 	rateLimitBurst int
@@ -69,6 +70,22 @@ func loadConfig() (config, error) {
 		maxConns = int32(n)
 	}
 
+	// MinConns > 0 turns on elastic resizing (docs/adr/0009-elastic-db-pool.md):
+	// the pool starts at this floor and grows toward WALLET_DB_MAX_CONNS
+	// under sustained load, shrinking back down toward the floor when idle.
+	// 0 (the default) keeps the pool fixed at MaxConns, exactly as before.
+	var minConns int32
+	if v := os.Getenv("WALLET_DB_MIN_CONNS"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 32)
+		if err != nil || n <= 0 {
+			return config{}, fmt.Errorf("WALLET_DB_MIN_CONNS must be a positive integer, got %q", v)
+		}
+		if int32(n) > maxConns {
+			return config{}, fmt.Errorf("WALLET_DB_MIN_CONNS (%d) must not exceed WALLET_DB_MAX_CONNS (%d)", n, maxConns)
+		}
+		minConns = int32(n)
+	}
+
 	// Optional: a second key that can only read (balance, entries), rejected
 	// with 403 on anything that moves money or creates an account. Empty
 	// means the feature is off and WALLET_API_KEY can do everything, as
@@ -107,7 +124,7 @@ func loadConfig() (config, error) {
 
 	return config{
 		dsn: dsn, apiKey: apiKey, readOnlyAPIKey: readOnlyAPIKey,
-		addr: addr, strategy: strategy, maxConns: maxConns,
+		addr: addr, strategy: strategy, minConns: minConns, maxConns: maxConns,
 		rateLimitRPS: rateLimitRPS, rateLimitBurst: rateLimitBurst,
 	}, nil
 
@@ -135,18 +152,28 @@ func run() error {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
+	// Built before the pool, not after: PoolConfig.ResizeMetrics needs a
+	// registry to register wallet_db_pool_resizes_total into at pool
+	// construction time, when cfg.minConns > 0 starts the resize loop.
+	registry := httpapi.NewRegistry()
+	resizeMetrics := postgres.NewPoolResizeMetrics(registry)
+
 	pool, err := postgres.NewPool(ctx, postgres.PoolConfig{
 		DSN:             cfg.dsn,
+		MinConns:        cfg.minConns,
 		MaxConns:        cfg.maxConns,
 		MaxConnLifetime: 30 * time.Minute,
 		AcquireTimeout:  3 * time.Second,
+		Logger:          logger,
+		ResizeMetrics:   resizeMetrics,
 	})
 	if err != nil {
 		return err
 	}
 	// Runs after srv.Shutdown below returns, so in-flight requests still
 	// using the pool have already drained: stop accepting -> drain -> close
-	// the pool -> exit.
+	// the pool -> exit. Close also stops the resize loop first (pool.go),
+	// so no resize can race against shutdown.
 	defer pool.Close()
 
 	accountRepo := postgres.NewAccountRepository(pool)
@@ -162,7 +189,6 @@ func run() error {
 	}
 	transfers := app.NewTransferService(executor)
 
-	registry := httpapi.NewRegistry()
 	postgres.RegisterPoolStats(registry, pool)
 	// Outbox lag is NOT registered here: wallet_app (this process's DB
 	// role) only has INSERT on outbox, never SELECT -- the lag query would
