@@ -33,6 +33,33 @@ func RegisterPoolStats(reg *prometheus.Registry, pool *Pool) {
 	}, func() float64 { return float64(pool.Stat().AcquireCount()) }))
 }
 
+// poolResizeMetrics counts elastic-pool resize events (pool_resize.go).
+// Nil-safe: a *Pool built without PoolConfig.ResizeMetrics (e.g. the
+// relay's fixed-size pool, which never resizes) just never calls these.
+type poolResizeMetrics struct {
+	resizes *prometheus.CounterVec
+}
+
+// NewPoolResizeMetrics registers wallet_db_pool_resizes_total and returns
+// the recorder to pass as PoolConfig.ResizeMetrics.
+func NewPoolResizeMetrics(reg *prometheus.Registry) *poolResizeMetrics {
+	m := &poolResizeMetrics{
+		resizes: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "wallet_db_pool_resizes_total",
+			Help: "Elastic pool resize events, by direction.",
+		}, []string{"direction"}),
+	}
+	reg.MustRegister(m.resizes)
+	return m
+}
+
+func (m *poolResizeMetrics) incResize(direction string) {
+	if m == nil {
+		return
+	}
+	m.resizes.WithLabelValues(direction).Inc()
+}
+
 // outboxLagQueryTimeout bounds the lag query so a stuck database cannot
 // hang a Prometheus scrape -- the scrape itself has its own timeout, but
 // this keeps the collector from being the thing that blocks forever.
@@ -108,13 +135,25 @@ func RegisterOutboxLag(reg *prometheus.Registry, pool *Pool, logger *slog.Logger
 //
 // 1. RegisterPoolStats — métrica de graça
 //
-// pool (o *Pool deste pacote, pool.go) embute *pgxpool.Pool sem nome de
-// campo, então pool.Stat() já está disponível hoje sem nenhum código novo no
-// pgxpool em si — ele mesmo já conta, internamente, quantas conexões estão
-// em uso, quantas estão ociosas, etc. Cada GaugeFunc aqui é só uma função
-// que o Prometheus chama na hora do scrape pra ler esse contador — não
-// existe nenhum estado guardado neste arquivo, o valor "atual" é sempre lido
-// direto do pgxpool.
+// pool.Stat() (o *Pool deste pacote, pool.go) encaminha pro pgxpool.Pool
+// atual por trás de um ponteiro atômico (desde que o pool ganhou
+// redimensionamento elástico, veja pool_resize.go) — então já está
+// disponível hoje sem nenhum código novo no pgxpool em si: ele mesmo já
+// conta, internamente, quantas conexões estão em uso, quantas estão
+// ociosas, etc. Cada GaugeFunc aqui é só uma função que o Prometheus chama
+// na hora do scrape pra ler esse contador — não existe nenhum estado
+// guardado neste arquivo, o valor "atual" é sempre lido direto do pgxpool
+// que current.Load() apontar naquele instante, inclusive logo depois de um
+// resize (por isso wallet_db_pool_max_conns reflete MaxConns sozinho, sem
+// precisar de nenhuma mudança quando o resize entrou no projeto).
+//
+// 1.1 poolResizeMetrics — por que é nil-safe em vez de obrigatório
+//
+// O pool do relay (cmd/relay) nunca liga elasticidade (MinConns fica zero
+// de propósito, ADR 9) — então incResize precisa aceitar m == nil sem
+// explodir, do contrário cada chamador teria que lembrar de checar nil
+// antes de chamar. Mesmo padrão já usado em RelayMetrics
+// (relay_metrics.go): métrica opcional, nunca obrigatória.
 //
 // 2. Por que o lag do outbox não é um GaugeFunc também
 //
